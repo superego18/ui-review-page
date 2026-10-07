@@ -2,7 +2,8 @@
 // UI 피드백 리뷰 서버. 의존성 없음 (Node 18+).
 // 사용: node review-server.mjs [--dir .ui-feedback] [--port 4799]
 //   <dir>/review.html 과 캡처 이미지를 정적으로 제공하고,
-//   페이지가 보낸 평가를 <dir>/r<round>.json 에 저장한다.
+//   페이지가 보낸 평가를 <dir>/r<round>.json 에, 대화를 <dir>/chat.json 에 저장한다.
+//   세션별 대화: 등록된 세션(<dir>/sessions/)을 /api/sessions 로 알려 주고, 메시지는 to(받는 세션)·session(보낸 세션)으로 나눈다.
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -49,70 +50,15 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
 }
 
 const chatFile = path.join(root, 'chat.json');
-const sessionFile = path.join(root, 'session.json');
+const sessionsDir = path.join(root, 'sessions');
 const TAIL_BYTES = 4 * 1024 * 1024;
-let transcriptCache = { key: '', data: null };
+const transcriptCache = new Map();
 
 function stripTags(text) {
   return text
     .replace(/<system-reminder[^>]*>[\s\S]*?<\/system-reminder>/g, '')
     .replace(/<(local-command-[a-z]+|command-[a-z]+)>[\s\S]*?<\/\1>/g, '')
     .trim();
-}
-
-// register-session.mjs 가 등록한 세션 기록에서 사용자 입력과 에이전트 답만 뽑는다.
-// 도구 실행, 시스템 메시지, 다른 세션·하위 에이전트 메시지는 뺀다. 기록 형식은 Claude Code·Codex 내부 형식이다.
-function readTranscript() {
-  let session, st;
-  try {
-    session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
-    st = fs.statSync(session.path);
-  } catch {
-    return { registered: false, items: [] };
-  }
-  // Claude 는 기록 파일에 일부 답이 빠지는 경우가 있어 쓰지 않는다. hook-relay.mjs 훅이 chat.json 으로 보낸다.
-  if (session.tool === 'claude') return { registered: false, items: [], via: 'hooks' };
-  const key = `${session.path}:${st.size}:${st.mtimeMs}`;
-  if (transcriptCache.key === key) return transcriptCache.data;
-
-  const len = Math.min(st.size, TAIL_BYTES);
-  const fd = fs.openSync(session.path, 'r');
-  const buf = Buffer.alloc(len);
-  fs.readSync(fd, buf, 0, len, st.size - len);
-  fs.closeSync(fd);
-  const lines = buf.toString('utf8').split('\n');
-  if (len < st.size) lines.shift();
-
-  const items = [];
-  const push = (id, role, text, at) => {
-    const t = stripTags(text || '');
-    if (t) items.push({ id: String(id), role, text: t.slice(0, 8000), at, source: 'terminal' });
-  };
-  for (const line of lines) {
-    let o;
-    try {
-      o = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (session.tool === 'claude') {
-      if (o.isSidechain) continue;
-      const content = o.message?.content;
-      if (o.type === 'user' && o.origin?.kind === 'human' && typeof content === 'string') push(o.uuid, 'user', content, o.timestamp);
-      if (o.type === 'assistant' && Array.isArray(content)) {
-        push(o.uuid, 'agent', content.filter((b) => b.type === 'text').map((b) => b.text).join('\n'), o.timestamp);
-      }
-    } else {
-      const p = o.payload;
-      if (o.type !== 'response_item' || p?.type !== 'message' || !['user', 'assistant'].includes(p.role)) continue;
-      const text = (p.content || []).filter((b) => b.type === 'input_text' || b.type === 'output_text').map((b) => b.text).join('\n');
-      if (p.role === 'user' && (text.trimStart().startsWith('<') || text.includes('AGENTS.md instructions'))) continue;
-      push(p.id || o.ordinal, p.role === 'user' ? 'user' : 'agent', text, o.timestamp);
-    }
-  }
-  const data = { registered: true, tool: session.tool, agent: session.agent, items: items.slice(-300) };
-  transcriptCache = { key, data };
-  return data;
 }
 
 function readChat() {
@@ -123,25 +69,93 @@ function readChat() {
   }
 }
 
+// register-session.mjs 가 등록한 세션들(.ui-feedback/sessions/<세션 id>.json)
+function listSessions() {
+  let files = [];
+  try {
+    files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith('.json'));
+  } catch {}
+  return files
+    .map((f) => {
+      try {
+        return JSON.parse(fs.readFileSync(path.join(sessionsDir, f), 'utf8'));
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => String(a.registeredAt).localeCompare(String(b.registeredAt)))
+    .map((s) => ({ id: s.sessionId, name: s.name, tool: s.tool, agent: s.agent, watch: readWatchFile(`watch-${s.sessionId}.json`) }));
+}
+
+function findSession(id) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(sessionsDir, `${id}.json`), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+// Codex 세션은 훅이 없어서 대화 기록 파일에서 사용자 입력과 에이전트 답만 뽑아 보여 준다(내부 형식).
+// Claude 세션은 hook-relay.mjs 훅이 chat.json 으로 보내므로 여기서는 읽지 않는다.
+function readTranscript(id) {
+  const session = findSession(id);
+  if (!session) return { items: [] };
+  if (session.tool !== 'codex') return { items: [], via: 'hooks' };
+  let st;
+  try {
+    st = fs.statSync(session.path);
+  } catch {
+    return { items: [] };
+  }
+  const key = `${st.size}:${st.mtimeMs}`;
+  const cached = transcriptCache.get(id);
+  if (cached && cached.key === key) return cached.data;
+  const len = Math.min(st.size, TAIL_BYTES);
+  const fd = fs.openSync(session.path, 'r');
+  const buf = Buffer.alloc(len);
+  fs.readSync(fd, buf, 0, len, st.size - len);
+  fs.closeSync(fd);
+  const lines = buf.toString('utf8').split('\n');
+  if (len < st.size) lines.shift();
+  const items = [];
+  for (const line of lines) {
+    let o;
+    try {
+      o = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const p = o.payload;
+    if (o.type !== 'response_item' || p?.type !== 'message' || !['user', 'assistant'].includes(p.role)) continue;
+    const text = stripTags((p.content || []).filter((b) => b.type === 'input_text' || b.type === 'output_text').map((b) => b.text).join('\n'));
+    if (!text || (p.role === 'user' && (text.startsWith('<') || text.includes('AGENTS.md instructions')))) continue;
+    items.push({ id: `x${p.id || o.ordinal}`, from: p.role === 'user' ? 'user' : 'agent', session: id, context: 'terminal', agent: session.agent, text: text.slice(0, 8000), at: o.timestamp });
+  }
+  const data = { items: items.slice(-300) };
+  transcriptCache.set(id, { key, data });
+  return data;
+}
+
 function readWatchFile(name) {
   try {
     const watch = JSON.parse(fs.readFileSync(path.join(root, name), 'utf8'));
     if (Date.parse(watch.expiresAt) < Date.now()) return { active: false };
     process.kill(watch.pid, 0);
-    return { active: true, agent: watch.agent, target: watch.target || 'all', expiresAt: watch.expiresAt };
+    return { active: true, agent: watch.agent, session: watch.session, handlesDone: !!watch.handlesDone, round: watch.round, expiresAt: watch.expiresAt };
   } catch {
     return { active: false };
   }
 }
 
-// 라운드(없으면 전체)의 감시 파일들(watch-r<N>.json, watch-r<N>-system.json, watch-r<N>-skill.json) 중 살아 있는 것을 모은다.
-function readWatch(round) {
-  if (round && !/^\d{1,3}$/.test(round)) return { active: false };
-  const re = new RegExp(`^watch-r${round || '\\d+'}(-(system|skill))?\\.json$`);
-  const live = fs.readdirSync(root).filter((f) => re.test(f)).map(readWatchFile).filter((w) => w.active);
-  if (!live.length) return { active: false };
-  const main = live.find((w) => w.target !== 'skill') || live[0];
-  return { ...main, targets: [...new Set(live.map((w) => w.target))] };
+// 리뷰 완료 표시를 받아 반영할 감시(handlesDone)가 살아 있는지. 페이지 위쪽 "자동 이어가기" 표시에 쓴다.
+function readReviewWatch() {
+  let files = [];
+  try {
+    files = fs.readdirSync(root).filter((f) => /^watch-.+\.json$/.test(f));
+  } catch {}
+  const live = files.map(readWatchFile).filter((w) => w.active && w.handlesDone);
+  return live[0] || { active: false };
 }
 
 const server = http.createServer((req, res) => {
@@ -153,11 +167,15 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === '/api/watch') {
-    return send(res, 200, readWatch(url.searchParams.get('round') || ''));
+    return send(res, 200, readReviewWatch());
+  }
+
+  if (url.pathname === '/api/sessions') {
+    return send(res, 200, { sessions: listSessions() });
   }
 
   if (url.pathname === '/api/transcript') {
-    return send(res, 200, readTranscript());
+    return send(res, 200, readTranscript(url.searchParams.get('session') || ''));
   }
 
   if (url.pathname === '/api/chat') {
@@ -182,7 +200,10 @@ const server = http.createServer((req, res) => {
         const chat = readChat();
         const entry = { id: chat.messages.length + 1, from: msg.from, text, round: Number(msg.round) || null, at: new Date().toISOString() };
         if (msg.from === 'agent' && typeof msg.agent === 'string') entry.agent = msg.agent.slice(0, 40);
-        entry.target = msg.target === 'skill' ? 'skill' : 'system';
+        // 사용자 메시지는 받을 세션(to), 에이전트 답과 터미널 입력은 그 세션(session)을 적는다.
+        const sid = (v) => (typeof v === 'string' && /^[\w.-]{1,80}$/.test(v) ? v : undefined);
+        if (sid(msg.to)) entry.to = msg.to;
+        if (sid(msg.session)) entry.session = msg.session;
         if (typeof msg.context === 'string') entry.context = msg.context.slice(0, 20);
         if (msg.where && typeof msg.where === 'object') {
           const w = msg.where;

@@ -106,7 +106,12 @@
   .target { display: flex; gap: 4px; padding: 8px 10px 0; border-top: 1px solid var(--rule); align-items: center; font-size: 12px; color: var(--ink-3); }
   .target button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; }
   .target button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: transparent; }
-  .compose { border-top: 0 !important; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 4px; }
+  .tabs button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; display: inline-flex; gap: 5px; align-items: center; }
+  .tabs button[aria-selected="true"] { background: var(--ink); color: var(--paper); border-color: transparent; }
+  .tabs .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .tabs .dot.on { background: var(--good); } .tabs .dot.off { background: var(--ink-3); }
+  .compose textarea:disabled, .compose button:disabled { opacity: .5; cursor: default; }
   .tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; }
   .msg.user .tag { background: rgba(255,255,255,.22); color: #fff; }
   .msg.agent .tag { background: var(--paper); color: var(--ink-2); }
@@ -132,17 +137,16 @@
   </section>
 </div>
 <button class="chatbtn" id="chatBtn" type="button" aria-expanded="false" aria-controls="chat">대화<span class="badge" id="chatBadge" hidden></span></button>
-<section class="chat" id="chat" hidden aria-label="작업 세션과 대화">
-  <header><b>작업 세션과 대화</b><p id="chatMode" data-auto="off"></p></header>
+<section class="chat" id="chat" hidden aria-label="세션과 대화">
+  <header>
+    <b>세션과 대화</b>
+    <div class="tabs" id="tabs" role="tablist" aria-label="세션"></div>
+    <p id="chatMode" data-auto="off"></p>
+  </header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
-  <div class="target" role="group" aria-label="고칠 대상">
-    고칠 대상
-    <button type="button" data-target="system" aria-pressed="true">작업 중인 시스템</button>
-    <button type="button" data-target="skill" aria-pressed="false">스킬(리뷰 방식)</button>
-  </div>
   <form class="compose" id="compose">
     <textarea id="chatInput" rows="1" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea>
-    <button type="submit">보내기</button>
+    <button type="submit" id="sendBtn">보내기</button>
   </form>
 </section>
 <dialog id="zoom" aria-label="이미지 크게 보기">
@@ -486,21 +490,20 @@ async function pollWatch() {
 pollWatch();
 setInterval(pollWatch, 5000);
 
+// 대화 창: 이 프로젝트에 등록된 세션마다 탭. 탭을 고르면 그 세션의 터미널 대화와 페이지·앱에서 그 세션에 보낸 메시지가 보이고,
+// 보내기는 그 세션에게만 간다. "전체" 탭은 모든 세션을 시간순으로 함께 본다.
 let chatMessages = [];
-let transcript = { registered: false, items: [] };
+let sessions = [];
+const transcripts = {};
+let activeTab = null;
+try { activeTab = localStorage.getItem('chatTab-' + REVIEW.project); } catch {}
 let seenAt = '';
 try { seenAt = localStorage.getItem('chatSeenAt-' + REVIEW.project) || ''; } catch {}
 
-// 대화 창 = 세션 터미널 대화(등록돼 있으면) + 페이지·앱 화면에서 보낸 메시지를 시간순으로 합친 것
-function timeline() {
-  const fromPage = chatMessages.map((m) => ({ ...m, source: m.context === 'terminal' ? 'terminal' : m.context === 'app' ? 'app' : 'review' }));
-  const fromTerminal = transcript.registered
-    ? transcript.items.map((m) => ({ id: 't' + m.id, from: m.role, text: m.text, at: m.at, source: 'terminal', agent: transcript.agent }))
-    : [];
-  return [...fromTerminal, ...fromPage].sort((a, b) => String(a.at).localeCompare(String(b.at)));
-}
+const sessionById = (id) => sessions.find((x) => x.id === id);
+const nameOf = (id) => sessionById(id)?.name || '세션';
+const ownerOf = (m) => m.to || m.session || null;
 
-// 에이전트 답의 간단한 마크다운(굵게, 코드)만 표시한다. 먼저 HTML을 이스케이프해서 안전하게 만든다.
 function mdLite(text) {
   const esc = text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   return esc
@@ -509,16 +512,53 @@ function mdLite(text) {
     .replace(/^#{1,6}\s+(.+)$/gm, '<strong>$1</strong>');
 }
 
+function timeline(tab) {
+  const fromCodex = Object.values(transcripts).flat();
+  return [...chatMessages, ...fromCodex]
+    .filter((m) => tab === 'all' || ownerOf(m) === tab)
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+
+function renderTabs() {
+  const box = $('#tabs');
+  box.textContent = '';
+  const tabs = [...sessions.map((x) => ({ id: x.id, label: x.name, live: x.watch?.active })), { id: 'all', label: '전체' }];
+  if (!tabs.some((t) => t.id === activeTab)) activeTab = (sessions.find((x) => x.name === '작업 세션') || sessions[0] || { id: 'all' }).id;
+  for (const t of tabs) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(t.id === activeTab));
+    b.textContent = t.label;
+    if (t.id !== 'all') {
+      const dot = document.createElement('span');
+      dot.className = 'dot ' + (t.live ? 'on' : 'off');
+      dot.title = t.live ? '바로 읽음' : '자동으로 읽지 않음';
+      b.prepend(dot);
+    }
+    b.onclick = () => {
+      activeTab = t.id;
+      try { localStorage.setItem('chatTab-' + REVIEW.project, activeTab); } catch {}
+      renderChat();
+      $('#chatInput').focus();
+    };
+    box.append(b);
+  }
+}
+
 function renderChat() {
+  renderTabs();
   const box = $('#msgs');
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   box.textContent = '';
-  const items = timeline();
+  const items = timeline(activeTab);
   if (items.length === 0) {
     const p = document.createElement('p');
     p.className = 'empty';
-    p.textContent = '평가하기 전에 궁금한 점을 물어보세요.\n작업 중인 시스템에 대한 것과 스킬(리뷰 페이지·진행 방식)에 대한 것을 아래에서 골라 보냅니다.';
     p.style.whiteSpace = 'pre-line';
+    p.textContent = sessions.length
+      ? '이 세션과의 대화가 여기에 보입니다.\n터미널에서 오간 대화도 함께 보입니다.'
+      : '등록된 세션이 없습니다.\n작업 세션이 리뷰를 시작할 때 자기 세션을 등록합니다.';
     box.append(p);
   }
   let lastDay = '';
@@ -535,36 +575,43 @@ function renderChat() {
     div.className = 'msg ' + m.from;
     const tag = document.createElement('span');
     tag.className = 'tag';
-    const where = m.source === 'terminal' ? '터미널' : m.source === 'app' ? '앱 화면' : '리뷰';
-    tag.textContent = m.source === 'terminal' ? where : `${where} · ${m.target === 'skill' ? '스킬' : '시스템'}`;
+    const where = m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱 화면' : m.context === 'reply' ? '답장' : '리뷰';
+    tag.textContent = activeTab === 'all' && ownerOf(m) ? `${nameOf(ownerOf(m))} · ${where}` : where;
     const body = document.createElement('span');
     body.innerHTML = mdLite(m.text);
     div.append(tag, body);
     const t = document.createElement('time');
-    t.textContent = (m.from === 'agent' ? (m.agent || '작업 세션') + ' · ' : '') +
+    t.textContent = (m.from === 'agent' ? (m.agent || nameOf(m.session)) + ' · ' : '') +
       new Date(m.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) + (m.round ? ` · ${m.round}차` : '');
     div.append(t);
     box.append(div);
   }
   const last = items[items.length - 1];
-  if (last && last.from === 'user' && last.source !== 'terminal') {
+  const target = activeTab === 'all' ? null : sessionById(activeTab);
+  if (last && last.from === 'user' && last.context !== 'terminal') {
     const w = document.createElement('p');
     w.className = 'waiting';
-    w.textContent = autoOn ? '작업 세션이 읽고 답하는 중…' : '자동으로 전달되지 않습니다. 터미널에 "대화 확인해"라고 보내 주세요.';
+    const s = sessionById(ownerOf(last));
+    w.textContent = s?.watch?.active ? `${s.name}이(가) 읽고 답하는 중…` : `자동으로 전달되지 않습니다. ${s ? s.name : '그 세션'} 터미널에 "대화 확인해"라고 보내 주세요.`;
     box.append(w);
   }
   if (nearBottom) box.scrollTop = box.scrollHeight;
-  $('#chatMode').dataset.auto = autoOn ? 'on' : 'off';
-  const mirror = transcript.registered || chatMessages.some((m) => m.context === 'terminal') ? '터미널 대화가 함께 보입니다. ' : '';
-  $('#chatMode').textContent = autoOn
-    ? `${mirror}여기서 보낸 메시지는 바로 전달되고, 작업 세션(${watch.agent})이 답합니다. 작업 중이면 끝난 뒤 답합니다.`
-    : `${mirror}여기서 보낸 메시지는 자동으로 전달되지 않습니다. 보낸 뒤 터미널에 "대화 확인해"라고 알려 주세요.`;
+  $('#chatMode').dataset.auto = target?.watch?.active ? 'on' : 'off';
+  $('#chatMode').textContent = !target
+    ? '모든 세션의 대화를 함께 봅니다. 보내려면 세션 탭을 고르세요.'
+    : target.watch?.active
+      ? `${target.name}에게 보냅니다. 바로 전달되고, 작업 중이면 끝난 뒤 답합니다.`
+      : `${target.name}에게 보냅니다. 지금은 자동으로 읽지 않으니, 보낸 뒤 그 세션 터미널에 "대화 확인해"라고 알려 주세요.`;
+  $('#chatInput').disabled = !target;
+  $('#sendBtn').disabled = !target;
+  $('#chatInput').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '보낼 세션 탭을 고르세요';
+  const all = timeline('all');
   const open = !$('#chat').hidden;
-  if (open && last) {
-    seenAt = String(last.at);
+  if (open && all.length) {
+    seenAt = String(all[all.length - 1].at);
     try { localStorage.setItem('chatSeenAt-' + REVIEW.project, seenAt); } catch {}
   }
-  const unread = items.filter((m) => m.from === 'agent' && String(m.at) > seenAt).length;
+  const unread = all.filter((m) => m.from === 'agent' && String(m.at) > seenAt).length;
   $('#chatBadge').hidden = unread === 0;
   $('#chatBadge').textContent = String(unread);
 }
@@ -572,14 +619,18 @@ function renderChat() {
 let chatKey = '';
 async function pollChat() {
   try {
-    const [c, t] = await Promise.all([fetch('/api/chat').then((r) => r.json()), fetch('/api/transcript').then((r) => r.json())]);
+    const [c, ss] = await Promise.all([fetch('/api/chat').then((r) => r.json()), fetch('/api/sessions').then((r) => r.json())]);
     chatMessages = c.messages || [];
-    transcript = t;
-    if (!seenAt) {
-      const items = timeline();
-      seenAt = items.length ? String(items[items.length - 1].at) : '0';
+    sessions = ss.sessions || [];
+    for (const x of sessions.filter((x) => x.tool === 'codex')) {
+      transcripts[x.id] = (await fetch('/api/transcript?session=' + encodeURIComponent(x.id)).then((r) => r.json())).items || [];
     }
-    const key = chatMessages.length + ':' + (t.items || []).length + ':' + ((t.items || []).slice(-1)[0]?.id || '');
+    if (!seenAt) {
+      const all = timeline('all');
+      seenAt = all.length ? String(all[all.length - 1].at) : '0';
+    }
+    const all = timeline('all');
+    const key = all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0)).join(',');
     if (key !== chatKey) {
       chatKey = key;
       renderChat();
@@ -598,26 +649,15 @@ $('#chatBtn').onclick = () => {
   }
 };
 
-let chatTarget = 'system';
-document.querySelectorAll('[data-target]').forEach((b) => {
-  b.onclick = () => {
-    chatTarget = b.dataset.target;
-    document.querySelectorAll('[data-target]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-    $('#chatInput').placeholder = chatTarget === 'skill'
-      ? '스킬에 대한 의견 · Enter 보내기'
-      : '질문이나 요청 · Enter 보내기';
-    $('#chatInput').focus();
-  };
-});
-
 $('#compose').onsubmit = async (e) => {
   e.preventDefault();
   const text = $('#chatInput').value.trim();
-  if (!text) return;
+  if (!text || activeTab === 'all' || !activeTab) return;
   $('#chatInput').value = '';
   try {
-    await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'user', text, round: REVIEW.round, target: chatTarget, context: 'review' }) });
+    await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'user', text, round: REVIEW.round, to: activeTab, context: 'review' }) });
     await pollChat();
+    renderChat();
     $('#msgs').scrollTop = $('#msgs').scrollHeight;
   } catch {
     $('#chatInput').value = text;
