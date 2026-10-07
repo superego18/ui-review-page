@@ -48,6 +48,16 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
 
+const chatFile = path.join(root, 'chat.json');
+
+function readChat() {
+  try {
+    return JSON.parse(fs.readFileSync(chatFile, 'utf8'));
+  } catch {
+    return { messages: [] };
+  }
+}
+
 function readWatch(round) {
   if (!/^\d{1,3}$/.test(round)) return { active: false };
   try {
@@ -70,6 +80,37 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/api/watch') {
     return send(res, 200, readWatch(url.searchParams.get('round') ?? ''));
+  }
+
+  if (url.pathname === '/api/chat') {
+    if (req.method === 'GET') return send(res, 200, readChat());
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > MAX_BODY) req.destroy();
+      });
+      req.on('end', () => {
+        let msg;
+        try {
+          msg = JSON.parse(body);
+        } catch {
+          return send(res, 400, { error: 'JSON 형식이 아닙니다.' });
+        }
+        const text = typeof msg.text === 'string' ? msg.text.trim().slice(0, 4000) : '';
+        if (!text || !['user', 'agent'].includes(msg.from)) {
+          return send(res, 400, { error: 'from(user|agent)과 text가 필요합니다.' });
+        }
+        const chat = readChat();
+        const entry = { id: chat.messages.length + 1, from: msg.from, text, round: Number(msg.round) || null, at: new Date().toISOString() };
+        if (msg.from === 'agent' && typeof msg.agent === 'string') entry.agent = msg.agent.slice(0, 40);
+        chat.messages.push(entry);
+        fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
+        send(res, 200, entry);
+      });
+      return;
+    }
+    return send(res, 405, { error: 'GET 또는 POST만 됩니다.' });
   }
 
   if (url.pathname === '/api/feedback') {

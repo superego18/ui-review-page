@@ -85,6 +85,24 @@
   .pinsummary { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); }
   .pinsummary .num { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); color: #fff; font: 600 9px/16px var(--sans); text-align: center; margin-right: 6px; vertical-align: 1px; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  .chatbtn { position: fixed; right: 20px; bottom: 20px; z-index: 20; font: inherit; font-weight: 600; font-size: 14px; padding: 11px 16px; border-radius: 999px; border: 0; background: var(--ink); color: var(--paper); cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.2); display: flex; gap: 8px; align-items: center; }
+  .chatbtn .badge { min-width: 18px; height: 18px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 11px; line-height: 18px; text-align: center; padding: 0 5px; }
+  .chat { position: fixed; right: 20px; bottom: 76px; z-index: 20; width: min(380px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--sheet); border-radius: 12px; box-shadow: 0 0 0 1px var(--rule), 0 12px 32px rgba(0,0,0,.18); display: flex; flex-direction: column; overflow: hidden; }
+  .chat header { padding: 12px 14px; border-bottom: 1px solid var(--rule); }
+  .chat header b { font-size: 14px; }
+  .chat header p { margin: 2px 0 0; font-size: 12px; line-height: 1.45; }
+  .chat header p[data-auto="on"] { color: var(--good); }
+  .chat header p[data-auto="off"] { color: var(--warn); }
+  .msgs { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--paper); }
+  .msg { max-width: 85%; padding: 8px 11px; border-radius: 10px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
+  .msg.agent { align-self: flex-start; background: var(--sheet); color: var(--ink); box-shadow: 0 0 0 1px var(--rule); border-bottom-left-radius: 3px; }
+  .msg time { display: block; font-size: 10px; opacity: .7; margin-top: 3px; }
+  .waiting { align-self: flex-start; font-size: 12px; color: var(--ink-3); }
+  .compose { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--rule); }
+  .compose textarea { min-height: 40px; max-height: 120px; resize: none; }
+  .compose button { flex-shrink: 0; white-space: nowrap; font: inherit; font-weight: 600; font-size: 14px; padding: 0 14px; border-radius: 8px; border: 0; background: var(--ink); color: var(--paper); cursor: pointer; }
+  .empty { margin: auto; text-align: center; font-size: 13px; color: var(--ink-3); line-height: 1.6; }
 </style>
 
 <div class="wrap">
@@ -103,6 +121,15 @@
     <p class="note" id="doneNote"></p>
   </section>
 </div>
+<button class="chatbtn" id="chatBtn" type="button" aria-expanded="false" aria-controls="chat">대화<span class="badge" id="chatBadge" hidden></span></button>
+<section class="chat" id="chat" hidden aria-label="작업 세션과 대화">
+  <header><b>작업 세션과 대화</b><p id="chatMode" data-auto="off"></p></header>
+  <div class="msgs" id="msgs" aria-live="polite"></div>
+  <form class="compose" id="compose">
+    <textarea id="chatInput" rows="1" placeholder="메시지 입력 · Enter 보내기" aria-label="메시지"></textarea>
+    <button type="submit">보내기</button>
+  </form>
+</section>
 <dialog id="zoom" aria-label="이미지 크게 보기">
   <div class="zbar">
     <span><b id="zoomName"></b> · 이미지를 누르면 그 위치에 메모 핀을 남깁니다 · Ctrl+휠로 확대</span>
@@ -337,15 +364,17 @@ $('#overall').oninput = () => {
   overallT = setTimeout(() => post({ overall: $('#overall').value }).catch(() => {}), 600);
 };
 let autoOn = false;
+let autoAtDone = false;
 let finished = false;
 
 function renderMode() {
   const time = (iso) => new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-  $('#mode').dataset.auto = autoOn ? 'on' : 'off';
-  if (autoOn && finished) {
+  const auto = finished ? autoAtDone : autoOn;
+  $('#mode').dataset.auto = auto ? 'on' : 'off';
+  if (auto && finished) {
     $('#modeTitle').textContent = `자동 이어가기 · ${watch.agent}가 피드백을 받아 작업을 이어갑니다`;
     $('#modeSub').textContent = '터미널에 보낼 메시지는 없습니다.';
-  } else if (autoOn) {
+  } else if (auto) {
     $('#modeTitle').textContent = `자동 이어가기 켜짐 · ${watch.agent}가 기다리는 중 (${time(watch.expiresAt)}까지)`;
     $('#modeSub').textContent = '완료 표시만 누르면 바로 이어서 작업합니다. 터미널에 메시지를 보낼 필요가 없습니다.';
   } else {
@@ -361,23 +390,114 @@ function renderMode() {
 
 let watch = {};
 async function pollWatch() {
-  if (finished) return;
   try {
     watch = await (await fetch('/api/watch?round=' + REVIEW.round)).json();
     autoOn = watch.active === true;
   } catch { autoOn = false; }
   renderMode();
+  if (typeof renderChat === 'function' && !$('#chat').hidden) renderChat();
 }
 pollWatch();
 setInterval(pollWatch, 5000);
 
+let chatMessages = [];
+let seenId = 0;
+try { seenId = Number(localStorage.getItem('chatSeen-' + REVIEW.project)) || 0; } catch {}
+
+function renderChat() {
+  const box = $('#msgs');
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.textContent = '';
+  if (chatMessages.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'empty';
+    p.textContent = '리뷰하면서 궁금한 점이나 요청을 보내 보세요.';
+    box.append(p);
+  }
+  for (const m of chatMessages) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + m.from;
+    div.textContent = m.text;
+    const t = document.createElement('time');
+    t.textContent = (m.from === 'agent' ? (m.agent || '작업 세션') + ' · ' : '') + new Date(m.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) + (m.round ? ` · ${m.round}차` : '');
+    div.append(t);
+    box.append(div);
+  }
+  const last = chatMessages[chatMessages.length - 1];
+  if (last && last.from === 'user') {
+    const w = document.createElement('p');
+    w.className = 'waiting';
+    w.textContent = autoOn ? '작업 세션이 읽고 답하는 중…' : '자동으로 전달되지 않습니다. 터미널에 "대화 확인해"라고 보내 주세요.';
+    box.append(w);
+  }
+  if (nearBottom) box.scrollTop = box.scrollHeight;
+  $('#chatMode').dataset.auto = autoOn ? 'on' : 'off';
+  $('#chatMode').textContent = autoOn
+    ? `${watch.agent}가 메시지를 바로 읽고 답합니다. 수정 요청은 다음 라운드에 반영합니다("지금 바로"라고 쓰면 즉시).`
+    : '작업 세션이 자동으로 읽지 않습니다. 보낸 뒤 터미널에 "대화 확인해"라고 알려 주세요.';
+  const open = !$('#chat').hidden;
+  const lastId = last ? last.id : 0;
+  if (open) {
+    seenId = lastId;
+    try { localStorage.setItem('chatSeen-' + REVIEW.project, String(seenId)); } catch {}
+  }
+  const unread = chatMessages.filter((m) => m.from === 'agent' && m.id > seenId).length;
+  $('#chatBadge').hidden = unread === 0;
+  $('#chatBadge').textContent = String(unread);
+}
+
+async function pollChat() {
+  try {
+    const data = await (await fetch('/api/chat')).json();
+    const changed = (data.messages || []).length !== chatMessages.length;
+    chatMessages = data.messages || [];
+    if (changed) renderChat();
+  } catch {}
+}
+
+$('#chatBtn').onclick = () => {
+  const open = $('#chat').hidden;
+  $('#chat').hidden = !open;
+  $('#chatBtn').setAttribute('aria-expanded', String(open));
+  renderChat();
+  if (open) {
+    $('#msgs').scrollTop = $('#msgs').scrollHeight;
+    $('#chatInput').focus();
+  }
+};
+
+$('#compose').onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $('#chatInput').value.trim();
+  if (!text) return;
+  $('#chatInput').value = '';
+  try {
+    await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'user', text, round: REVIEW.round }) });
+    await pollChat();
+    $('#msgs').scrollTop = $('#msgs').scrollHeight;
+  } catch {
+    $('#chatInput').value = text;
+  }
+};
+
+$('#chatInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    $('#compose').requestSubmit();
+  }
+});
+
+pollChat();
+setInterval(pollChat, 3000);
+
 $('#done').onclick = async () => {
   $('#done').disabled = true;
   finished = true;
+  autoAtDone = autoOn;
   try {
     await post({ done: true });
     renderMode();
-    $('#doneNote').textContent = autoOn
+    $('#doneNote').textContent = autoAtDone
       ? `완료로 표시했습니다. ${watch.agent}가 이어서 작업합니다. 터미널에 보낼 메시지는 없습니다.`
       : '완료로 표시했습니다. 이제 터미널에 "피드백 확인해"라고 보내 주세요.';
   } catch (e) { finished = false; $('#doneNote').textContent = '저장 실패 — 리뷰 서버가 켜져 있는지 확인하세요.'; $('#done').disabled = false; }
