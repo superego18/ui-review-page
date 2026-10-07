@@ -9,7 +9,9 @@ async (page) => {
   const VIEWPORT = { width: 1440, height: 900 }; // 모바일은 { width: 390, height: 844 }
   const SELECTOR = null; // 특정 영역만 찍으려면 CSS 선택자, 한 화면 전체면 null
 
-  // API 응답을 흉내 내야 하면 여기서 page.route(...)를 goto 전에 건다.
+  // 앞선 캡처에서 건 예시 응답(page.route)이 남아 있으면 실제 데이터 화면에 섞이므로 먼저 지운다.
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  // API 응답을 흉내 내야 하면 여기서 page.route(...)를 goto 전에 건다. 스크립트가 끝나면 다시 지운다.
   await page.setViewportSize(VIEWPORT);
   await page.goto(URL_);
   await page.waitForLoadState('networkidle');
@@ -56,5 +58,6 @@ async (page) => {
   // CDP 해제 뒤 Playwright가 크기를 그대로라고 보고 무시하므로, 한 번 바꿨다가 되돌린다.
   await page.setViewportSize({ width: VIEWPORT.width + 1, height: VIEWPORT.height });
   await page.setViewportSize(VIEWPORT);
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
   return { saved: OUT, pixels: size };
 }
