@@ -119,6 +119,10 @@
   .typing .dots i:nth-child(2) { animation-delay: .2s; } .typing .dots i:nth-child(3) { animation-delay: .4s; }
   .typing.permission { color: var(--warn); }
   @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  .tbadge { min-width: 16px; height: 16px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; line-height: 16px; text-align: center; padding: 0 4px; font-weight: 600; }
+  .divider.new { color: var(--accent); font-weight: 600; }
+  .divider.new::before, .divider.new::after { background: var(--accent); opacity: .5; }
+  .msg.agent.unread { box-shadow: 0 0 0 1px var(--rule), -3px 0 0 var(--accent); }
   .peek { position: fixed; right: 20px; bottom: 76px; z-index: 21; max-width: min(320px, calc(100vw - 40px)); background: var(--sheet); color: var(--ink); border-radius: 10px; box-shadow: 0 0 0 1px var(--rule), 0 8px 24px rgba(0,0,0,.18); padding: 10px 12px; font-size: 13px; line-height: 1.45; cursor: pointer; }
   .peek b { display: block; font-size: 12px; color: var(--accent); margin-bottom: 2px; }
   @media (prefers-reduced-motion: reduce) { .tabs .dot.busy, .typing .dots i { animation: none; } }
@@ -509,8 +513,13 @@ let sessions = [];
 const transcripts = {};
 let activeTab = null;
 try { activeTab = localStorage.getItem('chatTab-' + REVIEW.project); } catch {}
-let seenAt = '';
-try { seenAt = localStorage.getItem('chatSeenAt-' + REVIEW.project) || ''; } catch {}
+// 세션마다 마지막으로 읽은 시각. 그 뒤에 온 에이전트 답이 "안 읽음"이다. 탭을 열고 맨 아래까지 봐야 읽음으로 바뀐다.
+let seen = {};
+try { seen = JSON.parse(localStorage.getItem('chatSeen-' + REVIEW.project) || '{}'); } catch {}
+const saveSeen = () => { try { localStorage.setItem('chatSeen-' + REVIEW.project, JSON.stringify(seen)); } catch {} };
+const isUnread = (m) => m.from === 'agent' && !!m.session && String(m.at) > (seen[m.session] || '');
+const unreadOf = (sid) => timeline(sid).filter(isUnread).length;
+let scrollToUnread = true;
 
 const sessionById = (id) => sessions.find((x) => x.id === id);
 const nameOf = (id) => sessionById(id)?.name || '세션';
@@ -542,6 +551,13 @@ function renderTabs() {
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', String(t.id === activeTab));
     b.textContent = t.label;
+    const n = unreadOf(t.id);
+    if (n) {
+      const nb = document.createElement('span');
+      nb.className = 'tbadge';
+      nb.textContent = String(n);
+      b.append(nb);
+    }
     {
       const st = sessionById(t.id)?.status?.state;
       const dot = document.createElement('span');
@@ -551,6 +567,7 @@ function renderTabs() {
     }
     b.onclick = () => {
       activeTab = t.id;
+      scrollToUnread = true;
       try { localStorage.setItem('chatTab-' + REVIEW.project, activeTab); } catch {}
       renderChat();
       $('#chatInput').focus();
@@ -575,7 +592,15 @@ function renderChat() {
     box.append(p);
   }
   let lastDay = '';
-  for (const m of items) {
+  const firstUnread = items.findIndex(isUnread);
+  let newLine = null;
+  for (const [i, m] of items.entries()) {
+    if (i === firstUnread) {
+      newLine = document.createElement('p');
+      newLine.className = 'divider new';
+      newLine.textContent = '여기부터 새 메시지';
+      box.append(newLine);
+    }
     const day = new Date(m.at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' });
     if (day !== lastDay) {
       const d = document.createElement('p');
@@ -585,7 +610,7 @@ function renderChat() {
       lastDay = day;
     }
     const div = document.createElement('div');
-    div.className = 'msg ' + m.from;
+    div.className = 'msg ' + m.from + (isUnread(m) ? ' unread' : '');
     const tag = document.createElement('span');
     tag.className = 'tag';
     const where = m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱 화면' : m.context === 'reply' ? '답장' : '리뷰';
@@ -619,7 +644,12 @@ function renderChat() {
     w.textContent = s?.watch?.active ? `${s.name}이(가) 읽고 답하는 중…` : `자동으로 전달되지 않습니다. ${s ? s.name : '그 세션'} 터미널에 "대화 확인해"라고 보내 주세요.`;
     box.append(w);
   }
-  if (nearBottom) box.scrollTop = box.scrollHeight;
+  if (scrollToUnread && !$('#chat').hidden) {
+    box.scrollTop = newLine ? Math.max(0, newLine.offsetTop - 8) : box.scrollHeight;
+    scrollToUnread = false;
+  } else if (nearBottom) {
+    box.scrollTop = box.scrollHeight;
+  }
   $('#chatMode').dataset.auto = target?.watch?.active ? 'on' : 'off';
   $('#chatMode').textContent = !target
     ? '등록된 세션이 없습니다.'
@@ -631,17 +661,32 @@ function renderChat() {
   $('#chatInput').disabled = !target;
   $('#sendBtn').disabled = !target;
   $('#chatInput').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '등록된 세션이 없습니다';
-  const all = timeline('all');
-  const open = !$('#chat').hidden;
-  if (open && all.length) {
-    seenAt = String(all[all.length - 1].at);
-    try { localStorage.setItem('chatSeenAt-' + REVIEW.project, seenAt); } catch {}
-  }
-  const unread = all.filter((m) => m.from === 'agent' && String(m.at) > seenAt).length;
+  markReadIfAtBottom();
+  updateBadges();
+}
+
+function updateBadges() {
+  const unread = sessions.reduce((n, x) => n + unreadOf(x.id), 0);
   $('#chatBadge').hidden = unread === 0;
   $('#chatBadge').textContent = String(unread);
   document.title = (unread ? `(${unread}) ` : '') + baseTitle;
 }
+
+// 지금 탭을 맨 아래까지 봤으면 그 세션을 읽음으로 바꾼다(다른 세션의 안 읽음은 그대로 둔다).
+function markReadIfAtBottom() {
+  const box = $('#msgs');
+  if ($('#chat').hidden || !sessionById(activeTab)) return;
+  if (box.scrollHeight - box.scrollTop - box.clientHeight > 40) return;
+  const items = timeline(activeTab);
+  const last = items[items.length - 1];
+  if (last && String(last.at) > (seen[activeTab] || '')) {
+    seen[activeTab] = String(last.at);
+    saveSeen();
+    renderTabs();
+    updateBadges();
+  }
+}
+$('#msgs').addEventListener('scroll', markReadIfAtBottom);
 
 // 창이 닫혀 있을 때 새 답이 오면 버튼 옆에 5초 동안 미리보기를 띄운다. 누르면 그 세션 탭으로 연다.
 const baseTitle = document.title;
@@ -663,7 +708,9 @@ function peekNew() {
   peek.onclick = () => {
     peek.hidden = true;
     if (m.session) activeTab = m.session;
-    $('#chatBtn').click();
+    scrollToUnread = true;
+    if ($('#chat').hidden) $('#chatBtn').click();
+    else renderChat();
   };
   clearTimeout(peekTimer);
   peekTimer = setTimeout(() => { peek.hidden = true; }, 5000);
@@ -678,10 +725,16 @@ async function pollChat() {
     for (const x of sessions.filter((x) => x.tool === 'codex')) {
       transcripts[x.id] = (await fetch('/api/transcript?session=' + encodeURIComponent(x.id)).then((r) => r.json())).items || [];
     }
-    if (!seenAt) {
-      const all = timeline('all');
-      seenAt = all.length ? String(all[all.length - 1].at) : '0';
+    // 처음 보는 세션은 지금까지의 대화를 읽은 것으로 시작한다(예전 대화가 한꺼번에 "안 읽음"이 되지 않게).
+    let changedSeen = false;
+    for (const x of sessions) {
+      if (seen[x.id] === undefined) {
+        const items = timeline(x.id);
+        seen[x.id] = items.length ? String(items[items.length - 1].at) : '0';
+        changedSeen = true;
+      }
     }
+    if (changedSeen) saveSeen();
     const all = timeline('all');
     const key = all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '')).join(',');
     if (key !== chatKey) {
@@ -694,6 +747,7 @@ async function pollChat() {
 
 $('#chatBtn').onclick = () => {
   const open = $('#chat').hidden;
+  if (open) scrollToUnread = true;
   $('#chat').hidden = !open;
   $('#chatBtn').setAttribute('aria-expanded', String(open));
   renderChat();
