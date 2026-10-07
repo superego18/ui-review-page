@@ -123,6 +123,7 @@
 const REVIEW = {
   project: '__PROJECT__',
   round: 1,
+  scale: 2, // 캡처 배율. capture-2x.js로 찍었으면 2, page.screenshot으로 찍었으면 1
   items: [
     // { id: 'write', title: '작성 화면 재배치', changes: ['바뀐 점 한 줄', '…'], before: ['before-write.png'], after: ['after-write.png'] },
   ],
@@ -215,7 +216,7 @@ function applyZoom(scale) {
   const img = $('#zoomImg');
   const stage = $('#zoomStage');
   stage.dataset.fit = String(scale === 'fit');
-  img.style.width = scale === 'fit' ? '' : Math.round(img.naturalWidth * scale) + 'px';
+  img.style.width = scale === 'fit' ? '' : Math.round((img.naturalWidth / (REVIEW.scale || 1)) * scale) + 'px';
   document.querySelectorAll('[data-zoom]').forEach((b) => {
     b.setAttribute('aria-pressed', String(b.dataset.zoom === String(scale)));
   });
@@ -229,7 +230,7 @@ $('#zoomStage').addEventListener('wheel', (e) => {
   if (!e.ctrlKey && !e.metaKey) return;
   e.preventDefault();
   const img = $('#zoomImg');
-  const current = zoomScale === 'fit' ? img.getBoundingClientRect().width / img.naturalWidth : zoomScale;
+  const current = zoomScale === 'fit' ? img.getBoundingClientRect().width / (img.naturalWidth / (REVIEW.scale || 1)) : zoomScale;
   const next = Math.min(4, Math.max(0.25, Math.round((current + (e.deltaY < 0 ? 0.25 : -0.25)) * 4) / 4));
   applyZoom(next);
 }, { passive: false });
