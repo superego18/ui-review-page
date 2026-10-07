@@ -85,7 +85,18 @@ function listSessions() {
     })
     .filter(Boolean)
     .sort((a, b) => String(a.registeredAt).localeCompare(String(b.registeredAt)))
-    .map((s) => ({ id: s.sessionId, name: s.name, tool: s.tool, agent: s.agent, watch: readWatchFile(`watch-${s.sessionId}.json`) }));
+    .map((s) => ({ id: s.sessionId, name: s.name, tool: s.tool, agent: s.agent, watch: readWatchFile(`watch-${s.sessionId}.json`), status: readStatus(s.sessionId) }));
+}
+
+// hook-relay.mjs 가 보낸 세션 상태(작업 중·승인 대기·쉬는 중). 오래된 "작업 중"은 믿지 않는다.
+function readStatus(id) {
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(root, `status-${id}.json`), 'utf8'));
+    if (s.state !== 'idle' && Date.now() - Date.parse(s.at) > 30 * 60_000) return { state: 'unknown' };
+    return s;
+  } catch {
+    return { state: 'unknown' };
+  }
 }
 
 function findSession(id) {
@@ -172,6 +183,25 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/api/watch') {
     return send(res, 200, readReviewWatch());
+  }
+
+  if (url.pathname === '/api/status' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_BODY) req.destroy();
+    });
+    req.on('end', () => {
+      try {
+        const s = JSON.parse(body);
+        if (!/^[\w.-]{1,80}$/.test(String(s.session)) || !['working', 'permission', 'idle'].includes(s.state)) throw new Error();
+        fs.writeFileSync(path.join(root, `status-${s.session}.json`), JSON.stringify({ state: s.state, detail: String(s.detail || '').slice(0, 120), at: new Date().toISOString() }) + '\n');
+        send(res, 200, { ok: true });
+      } catch {
+        send(res, 400, { error: 'session, state(working|permission|idle)가 필요합니다.' });
+      }
+    });
+    return;
   }
 
   if (url.pathname === '/api/sessions') {

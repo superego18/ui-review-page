@@ -111,6 +111,17 @@
   .tabs button[aria-selected="true"] { background: var(--ink); color: var(--paper); border-color: transparent; }
   .tabs .dot { width: 6px; height: 6px; border-radius: 50%; }
   .tabs .dot.on { background: var(--good); } .tabs .dot.off { background: var(--ink-3); }
+  .tabs .dot.busy { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .typing { align-self: flex-start; display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--ink-2); background: var(--sheet); box-shadow: 0 0 0 1px var(--rule); border-radius: 10px; padding: 7px 11px; max-width: 85%; }
+  .typing .dots { display: inline-flex; gap: 3px; }
+  .typing .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-3); animation: blink 1.2s infinite; }
+  .typing .dots i:nth-child(2) { animation-delay: .2s; } .typing .dots i:nth-child(3) { animation-delay: .4s; }
+  .typing.permission { color: var(--warn); }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  .peek { position: fixed; right: 20px; bottom: 76px; z-index: 21; max-width: min(320px, calc(100vw - 40px)); background: var(--sheet); color: var(--ink); border-radius: 10px; box-shadow: 0 0 0 1px var(--rule), 0 8px 24px rgba(0,0,0,.18); padding: 10px 12px; font-size: 13px; line-height: 1.45; cursor: pointer; }
+  .peek b { display: block; font-size: 12px; color: var(--accent); margin-bottom: 2px; }
+  @media (prefers-reduced-motion: reduce) { .tabs .dot.busy, .typing .dots i { animation: none; } }
   .compose textarea:disabled, .compose button:disabled { opacity: .5; cursor: default; }
   .tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; }
   .msg.user .tag { background: rgba(255,255,255,.22); color: #fff; }
@@ -136,6 +147,7 @@
     <p class="note" id="doneNote"></p>
   </section>
 </div>
+<div class="peek" id="peek" hidden role="status"></div>
 <button class="chatbtn" id="chatBtn" type="button" aria-expanded="false" aria-controls="chat">대화<span class="badge" id="chatBadge" hidden></span></button>
 <section class="chat" id="chat" hidden aria-label="세션과 대화">
   <header>
@@ -531,8 +543,9 @@ function renderTabs() {
     b.setAttribute('aria-selected', String(t.id === activeTab));
     b.textContent = t.label;
     {
+      const st = sessionById(t.id)?.status?.state;
       const dot = document.createElement('span');
-      dot.className = 'dot ' + (t.live ? 'on' : 'off');
+      dot.className = 'dot ' + (st === 'working' || st === 'permission' ? 'busy' : t.live ? 'on' : 'off');
       dot.title = t.live ? '바로 읽음 또는 처리 중' : '자동으로 읽지 않음';
       b.prepend(dot);
     }
@@ -588,7 +601,18 @@ function renderChat() {
   }
   const last = items[items.length - 1];
   const target = sessionById(activeTab);
-  if (last && last.from === 'user' && last.context !== 'terminal') {
+  const st = target?.status;
+  if (st && (st.state === 'working' || st.state === 'permission')) {
+    const ty = document.createElement('div');
+    ty.className = 'typing' + (st.state === 'permission' ? ' permission' : '');
+    const dots = document.createElement('span');
+    dots.className = 'dots';
+    dots.innerHTML = '<i></i><i></i><i></i>';
+    const label = document.createElement('span');
+    label.textContent = st.state === 'permission' ? st.detail || '터미널에서 승인을 기다리는 중' : `작업 중 · ${st.detail || '생각하는 중'}`;
+    ty.append(dots, label);
+    box.append(ty);
+  } else if (last && last.from === 'user' && last.context !== 'terminal') {
     const w = document.createElement('p');
     w.className = 'waiting';
     const s = sessionById(ownerOf(last));
@@ -616,6 +640,33 @@ function renderChat() {
   const unread = all.filter((m) => m.from === 'agent' && String(m.at) > seenAt).length;
   $('#chatBadge').hidden = unread === 0;
   $('#chatBadge').textContent = String(unread);
+  document.title = (unread ? `(${unread}) ` : '') + baseTitle;
+}
+
+// 창이 닫혀 있을 때 새 답이 오면 버튼 옆에 5초 동안 미리보기를 띄운다. 누르면 그 세션 탭으로 연다.
+const baseTitle = document.title;
+let peekedAt = '';
+let peekTimer = null;
+function peekNew() {
+  const all = timeline('all');
+  if (!peekedAt) { peekedAt = all.length ? String(all[all.length - 1].at) : '0'; return; }
+  const fresh = all.filter((m) => m.from === 'agent' && String(m.at) > peekedAt);
+  if (all.length) peekedAt = String(all[all.length - 1].at);
+  if (!fresh.length || !$('#chat').hidden) return;
+  const m = fresh[fresh.length - 1];
+  const peek = $('#peek');
+  peek.textContent = '';
+  const who = document.createElement('b');
+  who.textContent = nameOf(m.session);
+  peek.append(who, m.text.replace(/\s+/g, ' ').slice(0, 90) + (m.text.length > 90 ? '…' : ''));
+  peek.hidden = false;
+  peek.onclick = () => {
+    peek.hidden = true;
+    if (m.session) activeTab = m.session;
+    $('#chatBtn').click();
+  };
+  clearTimeout(peekTimer);
+  peekTimer = setTimeout(() => { peek.hidden = true; }, 5000);
 }
 
 let chatKey = '';
@@ -632,11 +683,12 @@ async function pollChat() {
       seenAt = all.length ? String(all[all.length - 1].at) : '0';
     }
     const all = timeline('all');
-    const key = all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0)).join(',');
+    const key = all.length + ':' + (all[all.length - 1]?.id || '') + ':' + sessions.map((x) => x.id + (x.watch?.active ? 1 : 0) + (x.watch?.handling ? 'h' : '') + (x.status?.state || '') + (x.status?.detail || '')).join(',');
     if (key !== chatKey) {
       chatKey = key;
       renderChat();
     }
+    peekNew();
   } catch {}
 }
 
