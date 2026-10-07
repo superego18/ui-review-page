@@ -140,6 +140,10 @@ function readTranscript(id) {
 function readWatchFile(name) {
   try {
     const watch = JSON.parse(fs.readFileSync(path.join(root, name), 'utf8'));
+    if (watch.state === 'handling') {
+      if (Date.parse(watch.until) < Date.now()) return { active: false };
+      return { active: true, handling: true, agent: watch.agent, session: watch.session, handlesDone: !!watch.handlesDone, round: watch.round };
+    }
     if (Date.parse(watch.expiresAt) < Date.now()) return { active: false };
     process.kill(watch.pid, 0);
     return { active: true, agent: watch.agent, session: watch.session, handlesDone: !!watch.handlesDone, round: watch.round, expiresAt: watch.expiresAt };
