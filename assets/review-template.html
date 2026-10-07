@@ -491,7 +491,7 @@ pollWatch();
 setInterval(pollWatch, 5000);
 
 // 대화 창: 이 프로젝트에 등록된 세션마다 탭. 탭을 고르면 그 세션의 터미널 대화와 페이지·앱에서 그 세션에 보낸 메시지가 보이고,
-// 보내기는 그 세션에게만 간다. "전체" 탭은 모든 세션을 시간순으로 함께 본다.
+// 보내기는 그 세션에게만 간다.
 let chatMessages = [];
 let sessions = [];
 const transcripts = {};
@@ -522,15 +522,15 @@ function timeline(tab) {
 function renderTabs() {
   const box = $('#tabs');
   box.textContent = '';
-  const tabs = [...sessions.map((x) => ({ id: x.id, label: x.name, live: x.watch?.active })), { id: 'all', label: '전체' }];
-  if (!tabs.some((t) => t.id === activeTab)) activeTab = (sessions.find((x) => x.name === '작업 세션') || sessions[0] || { id: 'all' }).id;
+  const tabs = sessions.map((x) => ({ id: x.id, label: x.name, live: x.watch?.active }));
+  if (!tabs.some((t) => t.id === activeTab)) activeTab = (sessions.find((x) => x.name === '작업 세션') || sessions[0] || {}).id || null;
   for (const t of tabs) {
     const b = document.createElement('button');
     b.type = 'button';
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', String(t.id === activeTab));
     b.textContent = t.label;
-    if (t.id !== 'all') {
+    {
       const dot = document.createElement('span');
       dot.className = 'dot ' + (t.live ? 'on' : 'off');
       dot.title = t.live ? '바로 읽음' : '자동으로 읽지 않음';
@@ -587,7 +587,7 @@ function renderChat() {
     box.append(div);
   }
   const last = items[items.length - 1];
-  const target = activeTab === 'all' ? null : sessionById(activeTab);
+  const target = sessionById(activeTab);
   if (last && last.from === 'user' && last.context !== 'terminal') {
     const w = document.createElement('p');
     w.className = 'waiting';
@@ -598,13 +598,13 @@ function renderChat() {
   if (nearBottom) box.scrollTop = box.scrollHeight;
   $('#chatMode').dataset.auto = target?.watch?.active ? 'on' : 'off';
   $('#chatMode').textContent = !target
-    ? '모든 세션의 대화를 함께 봅니다. 보내려면 세션 탭을 고르세요.'
+    ? '등록된 세션이 없습니다.'
     : target.watch?.active
       ? `${target.name}에게 보냅니다. 바로 전달되고, 작업 중이면 끝난 뒤 답합니다.`
       : `${target.name}에게 보냅니다. 지금은 자동으로 읽지 않으니, 보낸 뒤 그 세션 터미널에 "대화 확인해"라고 알려 주세요.`;
   $('#chatInput').disabled = !target;
   $('#sendBtn').disabled = !target;
-  $('#chatInput').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '보낼 세션 탭을 고르세요';
+  $('#chatInput').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '등록된 세션이 없습니다';
   const all = timeline('all');
   const open = !$('#chat').hidden;
   if (open && all.length) {
@@ -652,7 +652,7 @@ $('#chatBtn').onclick = () => {
 $('#compose').onsubmit = async (e) => {
   e.preventDefault();
   const text = $('#chatInput').value.trim();
-  if (!text || activeTab === 'all' || !activeTab) return;
+  if (!text || !sessionById(activeTab)) return;
   $('#chatInput').value = '';
   try {
     await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'user', text, round: REVIEW.round, to: activeTab, context: 'review' }) });
