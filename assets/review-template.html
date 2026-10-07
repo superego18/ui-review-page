@@ -63,7 +63,7 @@
   .mode span.sub { color: var(--ink-2); }
   dialog { border: 0; padding: 16px; background: var(--sheet); color: var(--ink); border-radius: 10px; width: min(96vw, 1600px); max-width: 96vw; max-height: 94vh; overflow: hidden; box-sizing: border-box; display: none; flex-direction: column; }
   dialog[open] { display: flex; }
-  .stage { overflow: auto; flex: 1; min-height: 0; max-height: calc(94vh - 160px); border-radius: 6px; background: var(--paper); }
+  .stage { overflow: auto; touch-action: none; overscroll-behavior: contain; flex: 1; min-height: 0; max-height: calc(94vh - 160px); border-radius: 6px; background: var(--paper); }
   .zoomctl { display: flex; gap: 4px; align-items: center; }
   .zoomctl .ghost[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: transparent; }
   dialog::backdrop { background: rgba(0,0,0,.7); }
@@ -132,7 +132,7 @@
 </section>
 <dialog id="zoom" aria-label="이미지 크게 보기">
   <div class="zbar">
-    <span><b id="zoomName"></b> · 이미지를 누르면 그 위치에 메모 핀을 남깁니다 · Ctrl+휠로 확대</span>
+    <span><b id="zoomName"></b> · 이미지를 누르면 그 위치에 메모 핀을 남깁니다 · 핀치나 Ctrl+휠로 확대</span>
     <span class="zoomctl" role="group" aria-label="배율">
       <button class="ghost" type="button" data-zoom="fit">맞춤</button>
       <button class="ghost" type="button" data-zoom="1">100%</button>
@@ -238,12 +238,40 @@ function renderZoomPins() {
 
 let zoomScale = 'fit';
 
-function applyZoom(scale) {
-  zoomScale = scale;
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 8;
+
+function baseWidth() {
+  const img = $('#zoomImg');
+  return img.naturalWidth / (REVIEW.scale || 1);
+}
+
+function currentScale() {
+  return zoomScale === 'fit' ? $('#zoomImg').getBoundingClientRect().width / baseWidth() : zoomScale;
+}
+
+// anchor: 화면 좌표(clientX, clientY). 그 지점 아래의 이미지 위치가 확대 후에도 같은 자리에 오게 스크롤을 맞춘다.
+function applyZoom(scale, anchor) {
   const img = $('#zoomImg');
   const stage = $('#zoomStage');
+  let fx = 0, fy = 0, ax = 0, ay = 0;
+  if (anchor && scale !== 'fit') {
+    const r = img.getBoundingClientRect();
+    const sr = stage.getBoundingClientRect();
+    fx = (anchor.x - r.left) / r.width;
+    fy = (anchor.y - r.top) / r.height;
+    ax = anchor.x - sr.left;
+    ay = anchor.y - sr.top;
+  }
+  if (scale !== 'fit') scale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
+  zoomScale = scale;
   stage.dataset.fit = String(scale === 'fit');
-  img.style.width = scale === 'fit' ? '' : Math.round((img.naturalWidth / (REVIEW.scale || 1)) * scale) + 'px';
+  img.style.width = scale === 'fit' ? '' : Math.round(baseWidth() * scale) + 'px';
+  if (anchor && scale !== 'fit') {
+    const r = img.getBoundingClientRect();
+    stage.scrollLeft += r.left - stage.getBoundingClientRect().left + fx * r.width - ax;
+    stage.scrollTop += r.top - stage.getBoundingClientRect().top + fy * r.height - ay;
+  }
   document.querySelectorAll('[data-zoom]').forEach((b) => {
     b.setAttribute('aria-pressed', String(b.dataset.zoom === String(scale)));
   });
@@ -253,14 +281,56 @@ document.querySelectorAll('[data-zoom]').forEach((b) => {
   b.onclick = () => applyZoom(b.dataset.zoom === 'fit' ? 'fit' : Number(b.dataset.zoom));
 });
 
+// Ctrl+휠, 트랙패드 핀치(브라우저가 ctrlKey 휠로 보냄): 움직인 만큼 연속으로 확대·축소
 $('#zoomStage').addEventListener('wheel', (e) => {
   if (!e.ctrlKey && !e.metaKey) return;
   e.preventDefault();
-  const img = $('#zoomImg');
-  const current = zoomScale === 'fit' ? img.getBoundingClientRect().width / (img.naturalWidth / (REVIEW.scale || 1)) : zoomScale;
-  const next = Math.min(4, Math.max(0.25, Math.round((current + (e.deltaY < 0 ? 0.25 : -0.25)) * 4) / 4));
-  applyZoom(next);
+  const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+  applyZoom(currentScale() * Math.exp(-delta * 0.0025), { x: e.clientX, y: e.clientY });
 }, { passive: false });
+
+// 터치: 두 손가락은 핀치 확대·축소(두 손가락 가운데 중심), 한 손가락은 이동.
+// 확대 영역은 touch-action: none 이라 브라우저 대신 여기서 둘 다 처리한다.
+const touches = new Map();
+let pinch = null;
+let moved = false;
+let gestureEndedAt = 0;
+const stageEl = $('#zoomStage');
+stageEl.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch') return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 1) moved = false;
+  if (touches.size === 2) {
+    const [a, b] = [...touches.values()];
+    pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), scale: currentScale() };
+    moved = true;
+  }
+});
+stageEl.addEventListener('pointermove', (e) => {
+  const prev = touches.get(e.pointerId);
+  if (!prev) return;
+  const now = { x: e.clientX, y: e.clientY };
+  touches.set(e.pointerId, now);
+  if (pinch && touches.size === 2) {
+    const [a, b] = [...touches.values()];
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    applyZoom(pinch.scale * (dist / pinch.dist), { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  } else if (touches.size === 1) {
+    const dx = now.x - prev.x, dy = now.y - prev.y;
+    if (Math.abs(dx) + Math.abs(dy) > 0) {
+      stageEl.scrollLeft -= dx;
+      stageEl.scrollTop -= dy;
+    }
+    if (Math.hypot(dx, dy) > 3) moved = true;
+  }
+});
+function endTouch(e) {
+  if (!touches.has(e.pointerId)) return;
+  touches.delete(e.pointerId);
+  if (moved) gestureEndedAt = Date.now();
+  if (touches.size < 2) pinch = null;
+}
+['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => stageEl.addEventListener(t, endTouch));
 
 function openZoom(itemId, file) {
   zoomCtx = { itemId, file };
@@ -273,6 +343,7 @@ function openZoom(itemId, file) {
 }
 
 $('#zoomImg').onclick = (e) => {
+  if (pinch || Date.now() - gestureEndedAt < 400) return;
   const r = e.currentTarget.getBoundingClientRect();
   const x = Math.round(((e.clientX - r.left) / r.width) * 1000) / 10;
   const y = Math.round(((e.clientY - r.top) / r.height) * 1000) / 10;
