@@ -32,15 +32,25 @@ async (page) => {
   await cdp.send('Emulation.clearDeviceMetricsOverride');
   await cdp.detach();
 
-  await page.setContent(
-    `<style>html,body{margin:0;padding:0;background:#fff}img{display:block}</style><img id="shot" src="data:image/png;base64,${data}">`,
+  // 화면 크기를 먼저 이미지 크기로 맞춘 뒤 이미지를 띄우고, 다 그려질 때까지 기다렸다 찍는다.
+  // 크기를 나중에 키우면 새로 드러난 영역에 이전 페이지 화면(고정 헤더 등)이 남아 함께 찍힌다.
+  const size = await page.evaluate(
+    (b64) =>
+      new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        img.src = 'data:image/png;base64,' + b64;
+      }),
+    data,
   );
-  const size = await page.evaluate(async () => {
-    const img = document.getElementById('shot');
-    await img.decode();
-    return { width: img.naturalWidth, height: img.naturalHeight };
-  });
   await page.setViewportSize(size);
+  await page.setContent(
+    `<style>html,body{margin:0;padding:0;background:#fff;overflow:hidden}img{display:block}</style><img id="shot" src="data:image/png;base64,${data}">`,
+  );
+  await page.evaluate(async () => {
+    await document.getElementById('shot').decode();
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  });
   await page.screenshot({ path: OUT, clip: { x: 0, y: 0, ...size } });
 
   // CDP 해제 뒤 Playwright가 크기를 그대로라고 보고 무시하므로, 한 번 바꿨다가 되돌린다.
