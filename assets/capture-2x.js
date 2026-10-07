@@ -1,7 +1,8 @@
 // 2배 해상도 캡처. Playwright MCP의 browser_run_code_unsafe에 이 함수를 그대로 넘긴다.
 // 맨 위 네 값만 바꾼다. 페이지는 미리 열어 두지 않아도 된다(URL로 연다).
-// page.screenshot은 화면 배율을 1로 고정하므로, CDP로 배율 2를 걸고 직접 찍은 뒤
-// 다운로드 저장으로 파일을 쓴다(실행 환경에서 fs를 쓸 수 없음).
+// page.screenshot은 화면 배율을 1로 고정하므로, CDP로 배율 2를 걸고 직접 찍는다.
+// 실행 환경에서 fs를 쓸 수 없고, 다운로드 저장은 새 브라우저 첫 실행에서 page가 닫히는 문제가 있어서
+// 찍은 이미지를 같은 페이지에 원본 크기로 띄운 뒤 page.screenshot(배율 1)으로 픽셀 그대로 저장한다.
 async (page) => {
   const URL_ = 'http://localhost:3001/';
   const OUT = '/절대경로/.ui-feedback/r1-화면.png';
@@ -20,27 +21,30 @@ async (page) => {
   if (SELECTOR) {
     const el = page.locator(SELECTOR).first();
     await el.scrollIntoViewIfNeeded();
-    const box = await el.boundingBox();
-    clip = { x: box.x, y: box.y, width: box.width, height: box.height, scale: 1 };
+    // CDP의 clip은 문서 기준 좌표라서 스크롤 위치를 더한다.
+    const box = await el.evaluate((node) => {
+      const r = node.getBoundingClientRect();
+      return { x: r.left + window.scrollX, y: r.top + window.scrollY, width: r.width, height: r.height };
+    });
+    clip = { ...box, scale: 1 };
   }
   const { data } = await cdp.send('Page.captureScreenshot', { format: 'png', ...(clip ? { clip } : {}) });
   await cdp.send('Emulation.clearDeviceMetricsOverride');
   await cdp.detach();
 
-  const download = page.waitForEvent('download');
-  await page.evaluate((b64) => {
-    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
-    a.download = 'capture.png';
-    document.body.append(a);
-    a.click();
-    a.remove();
-  }, data);
-  await (await download).saveAs(OUT);
+  await page.setContent(
+    `<style>html,body{margin:0;padding:0;background:#fff}img{display:block}</style><img id="shot" src="data:image/png;base64,${data}">`,
+  );
+  const size = await page.evaluate(async () => {
+    const img = document.getElementById('shot');
+    await img.decode();
+    return { width: img.naturalWidth, height: img.naturalHeight };
+  });
+  await page.setViewportSize(size);
+  await page.screenshot({ path: OUT, clip: { x: 0, y: 0, ...size } });
 
   // CDP 해제 뒤 Playwright가 크기를 그대로라고 보고 무시하므로, 한 번 바꿨다가 되돌린다.
   await page.setViewportSize({ width: VIEWPORT.width + 1, height: VIEWPORT.height });
   await page.setViewportSize(VIEWPORT);
-  return { saved: OUT, viewport: await page.evaluate(() => [innerWidth, innerHeight, devicePixelRatio]) };
+  return { saved: OUT, pixels: size };
 }
