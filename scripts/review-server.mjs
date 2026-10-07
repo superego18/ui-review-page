@@ -63,6 +63,11 @@ function readWatch(round) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
 
+  if (url.pathname === '/favicon.ico') {
+    res.writeHead(204);
+    return res.end();
+  }
+
   if (url.pathname === '/api/watch') {
     return send(res, 200, readWatch(url.searchParams.get('round') ?? ''));
   }

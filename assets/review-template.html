@@ -36,7 +36,8 @@
   figcaption b { font-weight: 600; font-size: 11px; padding: 1px 6px; border-radius: 4px; }
   .before b { background: var(--paper); color: var(--ink-2); box-shadow: 0 0 0 1px var(--rule); }
   .after b { background: var(--accent-soft); color: var(--accent); }
-  figure button { padding: 0; border: 0; background: none; cursor: zoom-in; border-radius: 6px; display: block; }
+  figure button { padding: 0; border: 0; background: none; cursor: zoom-in; border-radius: 6px; display: block; width: 100%; }
+  figure .pinwrap { width: 100%; }
   figure img { display: block; width: 100%; border-radius: 6px; outline: 1px solid var(--rule); outline-offset: -1px; }
   .verdict { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 12px; border-top: 1px solid var(--rule); }
   .opt { font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 7px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; transition: background-color .15s, color .15s, transform .1s; }
@@ -57,9 +58,23 @@
   .mode[data-auto="on"] { background: var(--good-soft); color: var(--good); }
   .mode[data-auto="off"] { background: var(--warn-soft); color: var(--warn); }
   .mode span.sub { color: var(--ink-2); }
-  dialog { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 94vh; }
+  dialog { border: 0; padding: 16px; background: var(--sheet); color: var(--ink); border-radius: 10px; max-width: min(96vw, 1400px); max-height: 94vh; overflow: auto; box-sizing: border-box; }
   dialog::backdrop { background: rgba(0,0,0,.7); }
-  dialog img { max-width: 96vw; max-height: 94vh; display: block; border-radius: 6px; }
+  .zbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 13px; color: var(--ink-2); }
+  .zbar b { color: var(--ink); font-family: var(--mono); font-weight: 500; }
+  .pinwrap { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+  .pinwrap img { display: block; max-width: 100%; }
+  dialog .pinwrap img { max-height: 72vh; width: auto; border-radius: 6px; cursor: crosshair; }
+  .pin { position: absolute; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font: 600 11px/22px var(--sans); text-align: center; box-shadow: 0 0 0 2px #fff, 0 2px 6px rgba(0,0,0,.35); pointer-events: none; }
+  figure .pin { width: 16px; height: 16px; font-size: 9px; line-height: 16px; }
+  .pinlist { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+  .pinlist li { display: flex; gap: 8px; align-items: center; }
+  .pinlist .num { flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; font: 600 11px/20px var(--sans); text-align: center; }
+  .pinlist input { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--ink); background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 7px 9px; }
+  .pinlist .src { font-family: var(--mono); font-size: 11px; color: var(--ink-3); flex-shrink: 0; }
+  .ghost { font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; }
+  .pinsummary { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); }
+  .pinsummary .num { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); color: #fff; font: 600 9px/16px var(--sans); text-align: center; margin-right: 6px; vertical-align: 1px; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
@@ -67,7 +82,7 @@
   <header>
     <div class="eyebrow" id="eyebrow"></div>
     <h1 id="title"></h1>
-    <p>항목마다 <strong>좋음 / 수정 필요 / 되돌리기</strong> 중 하나를 고르고, 필요하면 한 줄 남겨 주세요. 선택은 이 프로젝트의 <code>.ui-feedback/</code> 폴더에 바로 저장됩니다. 이미지를 누르면 크게 보입니다.</p>
+    <p>항목마다 <strong>좋음 / 수정 필요 / 되돌리기</strong> 중 하나를 고르고, 필요하면 한 줄 남겨 주세요. 선택은 이 프로젝트의 <code>.ui-feedback/</code> 폴더에 바로 저장됩니다. 이미지를 누르면 크게 보이고, 크게 본 이미지 위를 누르면 그 위치에 핀을 찍어 메모할 수 있습니다.</p>
   </header>
   <div class="mode" id="mode" data-auto="off"><span class="dot"></span><div><b id="modeTitle">확인 중…</b><span class="sub" id="modeSub"></span></div></div>
   <div class="status" id="status"><span class="pill" id="count"></span><span id="conn">불러오는 중…</span></div>
@@ -79,7 +94,11 @@
     <p class="note" id="doneNote"></p>
   </section>
 </div>
-<dialog id="zoom"><img id="zoomImg" alt=""></dialog>
+<dialog id="zoom" aria-label="이미지 크게 보기">
+  <div class="zbar"><span><b id="zoomName"></b> · 이미지를 누르면 그 위치에 메모 핀을 남깁니다</span><button class="ghost" id="zoomClose" type="button">닫기</button></div>
+  <div class="pinwrap" id="zoomWrap"><img id="zoomImg" alt=""></div>
+  <ul class="pinlist" id="zoomPins"></ul>
+</dialog>
 
 <script>
 // ── 매 라운드 이 블록만 바꾼다 ──
@@ -97,7 +116,24 @@ const LABELS = { good: '좋음', tweak: '수정 필요', revert: '되돌리기' 
 const state = {};
 const $ = (s) => document.querySelector(s);
 
-function shot(file, kind) {
+function pinsOf(itemId) {
+  return state[itemId]?.pins || [];
+}
+
+function drawPins(wrap, itemId, file) {
+  wrap.querySelectorAll('.pin').forEach((p) => p.remove());
+  pinsOf(itemId).forEach((pin, i) => {
+    if (pin.image !== file) return;
+    const dot = document.createElement('span');
+    dot.className = 'pin';
+    dot.textContent = String(i + 1);
+    dot.style.left = pin.x + '%';
+    dot.style.top = pin.y + '%';
+    wrap.append(dot);
+  });
+}
+
+function shot(file, kind, itemId) {
   const f = document.createElement('figure');
   f.className = kind;
   const cap = document.createElement('figcaption');
@@ -105,14 +141,76 @@ function shot(file, kind) {
   cap.append(file.replace('.png', ''));
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.setAttribute('aria-label', '크게 보기');
+  btn.setAttribute('aria-label', '크게 보고 핀 메모 남기기');
+  const wrap = document.createElement('span');
+  wrap.className = 'pinwrap';
   const img = document.createElement('img');
   img.src = file; img.alt = file; img.loading = 'lazy';
-  btn.append(img);
-  btn.onclick = () => { $('#zoomImg').src = file; $('#zoom').showModal(); };
+  wrap.append(img);
+  drawPins(wrap, itemId, file);
+  btn.append(wrap);
+  btn.onclick = () => openZoom(itemId, file);
   f.append(cap, btn);
   return f;
 }
+
+let zoomCtx = null;
+let pinT;
+
+function savePins(itemId) {
+  clearTimeout(pinT);
+  pinT = setTimeout(() => save(itemId, { pins: pinsOf(itemId) }), 500);
+}
+
+function renderZoomPins() {
+  const { itemId, file } = zoomCtx;
+  drawPins($('#zoomWrap'), itemId, file);
+  const list = $('#zoomPins');
+  list.textContent = '';
+  pinsOf(itemId).forEach((pin, i) => {
+    if (pin.image !== file) return;
+    const li = document.createElement('li');
+    const num = document.createElement('span');
+    num.className = 'num'; num.textContent = String(i + 1);
+    const input = document.createElement('input');
+    input.value = pin.note || '';
+    input.placeholder = '이 위치에 대한 의견';
+    input.setAttribute('aria-label', `핀 ${i + 1} 메모`);
+    input.oninput = () => { pin.note = input.value; savePins(itemId); };
+    const del = document.createElement('button');
+    del.type = 'button'; del.className = 'ghost'; del.textContent = '삭제';
+    del.onclick = () => {
+      state[itemId].pins = pinsOf(itemId).filter((p) => p !== pin);
+      savePins(itemId);
+      renderZoomPins();
+    };
+    li.append(num, input, del);
+    list.append(li);
+  });
+}
+
+function openZoom(itemId, file) {
+  zoomCtx = { itemId, file };
+  $('#zoomName').textContent = file.replace('.png', '');
+  $('#zoomImg').src = file;
+  renderZoomPins();
+  $('#zoom').showModal();
+}
+
+$('#zoomImg').onclick = (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  const x = Math.round(((e.clientX - r.left) / r.width) * 1000) / 10;
+  const y = Math.round(((e.clientY - r.top) / r.height) * 1000) / 10;
+  const { itemId, file } = zoomCtx;
+  state[itemId] = { ...(state[itemId] || {}), pins: [...pinsOf(itemId), { image: file, x, y, note: '' }] };
+  savePins(itemId);
+  renderZoomPins();
+  const inputs = $('#zoomPins').querySelectorAll('input');
+  inputs[inputs.length - 1]?.focus();
+};
+$('#zoomClose').onclick = () => $('#zoom').close();
+$('#zoom').addEventListener('click', (e) => { if (e.target === $('#zoom')) $('#zoom').close(); });
+$('#zoom').addEventListener('close', () => render());
 
 function render() {
   const root = $('#items');
@@ -126,8 +224,8 @@ function render() {
     const ul = sec.querySelector('.changes');
     it.changes.forEach((c) => { const li = document.createElement('li'); li.textContent = c; ul.append(li); });
     const shots = sec.querySelector('.shots');
-    it.before.forEach((f) => shots.append(shot(f, 'before')));
-    it.after.forEach((f) => shots.append(shot(f, 'after')));
+    it.before.forEach((f) => shots.append(shot(f, 'before', it.id)));
+    it.after.forEach((f) => shots.append(shot(f, 'after', it.id)));
     const v = sec.querySelector('.verdict');
     for (const key of Object.keys(LABELS)) {
       const b = document.createElement('button');
@@ -143,6 +241,18 @@ function render() {
     ta.value = state[it.id]?.memo ?? '';
     let t;
     ta.oninput = () => { clearTimeout(t); t = setTimeout(() => save(it.id, { memo: ta.value }), 600); };
+    const pins = pinsOf(it.id);
+    if (pins.length) {
+      const ul2 = document.createElement('ul');
+      ul2.className = 'pinsummary';
+      pins.forEach((pin, i) => {
+        const li = document.createElement('li');
+        li.innerHTML = `<span class="num">${i + 1}</span>`;
+        li.append(`${pin.image.replace('.png', '')}: ${pin.note || '(메모 없음)'}`);
+        ul2.append(li);
+      });
+      sec.append(ul2);
+    }
     root.append(sec);
   }
   updateCount();
@@ -224,7 +334,6 @@ $('#done').onclick = async () => {
       : '완료로 표시했습니다. 이제 터미널에 "피드백 확인해"라고 보내 주세요.';
   } catch (e) { finished = false; $('#doneNote').textContent = '저장 실패 — 리뷰 서버가 켜져 있는지 확인하세요.'; $('#done').disabled = false; }
 };
-$('#zoom').onclick = () => $('#zoom').close();
 
 $('#title').textContent = document.title;
 $('#eyebrow').textContent = `${REVIEW.project} · ${REVIEW.round}차 리뷰`;
