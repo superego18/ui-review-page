@@ -58,16 +58,25 @@ function readChat() {
   }
 }
 
-function readWatch(round) {
-  if (!/^\d{1,3}$/.test(round)) return { active: false };
+function readWatchFile(name) {
   try {
-    const watch = JSON.parse(fs.readFileSync(path.join(root, `watch-r${round}.json`), 'utf8'));
+    const watch = JSON.parse(fs.readFileSync(path.join(root, name), 'utf8'));
     if (Date.parse(watch.expiresAt) < Date.now()) return { active: false };
     process.kill(watch.pid, 0);
-    return { active: true, agent: watch.agent, expiresAt: watch.expiresAt };
+    return { active: true, agent: watch.agent, target: watch.target || 'all', expiresAt: watch.expiresAt };
   } catch {
     return { active: false };
   }
+}
+
+// 라운드(없으면 전체)의 감시 파일들(watch-r<N>.json, watch-r<N>-system.json, watch-r<N>-skill.json) 중 살아 있는 것을 모은다.
+function readWatch(round) {
+  if (round && !/^\d{1,3}$/.test(round)) return { active: false };
+  const re = new RegExp(`^watch-r${round || '\\d+'}(-(system|skill))?\\.json$`);
+  const live = fs.readdirSync(root).filter((f) => re.test(f)).map(readWatchFile).filter((w) => w.active);
+  if (!live.length) return { active: false };
+  const main = live.find((w) => w.target !== 'skill') || live[0];
+  return { ...main, targets: [...new Set(live.map((w) => w.target))] };
 }
 
 const server = http.createServer((req, res) => {
@@ -79,10 +88,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === '/api/watch') {
-    const round = url.searchParams.get('round');
-    if (round) return send(res, 200, readWatch(round));
-    const rounds = fs.readdirSync(root).map((f) => f.match(/^watch-r(\d+)\.json$/)?.[1]).filter(Boolean);
-    return send(res, 200, rounds.map(readWatch).find((w) => w.active) || { active: false });
+    return send(res, 200, readWatch(url.searchParams.get('round') || ''));
   }
 
   if (url.pathname === '/api/chat') {
