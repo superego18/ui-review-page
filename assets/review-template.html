@@ -30,7 +30,7 @@
   .item h2 { font-size: 17px; font-weight: 600; margin: 0; display: flex; gap: 10px; align-items: baseline; }
   .item h2 .k { font-family: var(--mono); font-size: 12px; color: var(--ink-3); font-weight: 400; }
   .changes { margin: 0; padding-left: 18px; color: var(--ink-2); line-height: 1.65; font-size: 14px; }
-  .shots { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .shots { display: grid; gap: 12px; align-items: start; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
   figure { margin: 0; min-width: 0; display: grid; gap: 6px; }
   figcaption { font-size: 12px; color: var(--ink-3); display: flex; gap: 6px; align-items: center; }
   figcaption b { font-weight: 600; font-size: 11px; padding: 1px 6px; border-radius: 4px; }
@@ -39,6 +39,9 @@
   figure button { padding: 0; border: 0; background: none; cursor: zoom-in; border-radius: 6px; display: block; width: 100%; }
   figure .pinwrap { width: 100%; }
   figure img { display: block; width: 100%; border-radius: 6px; outline: 1px solid var(--rule); outline-offset: -1px; }
+  figure.tall { justify-items: start; }
+  figure.tall button { width: auto; max-width: 280px; }
+  figure.tall img { max-height: 640px; width: auto; max-width: 100%; }
   .verdict { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 12px; border-top: 1px solid var(--rule); }
   .opt { font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 7px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; transition: background-color .15s, color .15s, transform .1s; }
   .opt:active { transform: scale(.97); }
@@ -146,6 +149,7 @@ function shot(file, kind, itemId) {
   wrap.className = 'pinwrap';
   const img = document.createElement('img');
   img.src = file; img.alt = file; img.loading = 'lazy';
+  img.onload = () => { if (img.naturalHeight > img.naturalWidth * 1.3) f.classList.add('tall'); };
   wrap.append(img);
   drawPins(wrap, itemId, file);
   btn.append(wrap);
