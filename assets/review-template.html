@@ -486,42 +486,56 @@ pollWatch();
 setInterval(pollWatch, 5000);
 
 let chatMessages = [];
-let seenId = 0;
-try { seenId = Number(localStorage.getItem('chatSeen-' + REVIEW.project)) || 0; } catch {}
+let transcript = { registered: false, items: [] };
+let seenAt = '';
+try { seenAt = localStorage.getItem('chatSeenAt-' + REVIEW.project) || ''; } catch {}
+
+// 대화 창 = 세션 터미널 대화(등록돼 있으면) + 페이지·앱 화면에서 보낸 메시지를 시간순으로 합친 것
+function timeline() {
+  const fromPage = chatMessages.map((m) => ({ ...m, source: m.context === 'app' ? 'app' : 'review' }));
+  const fromTerminal = transcript.registered
+    ? transcript.items.map((m) => ({ id: 't' + m.id, from: m.role, text: m.text, at: m.at, source: 'terminal', agent: transcript.agent }))
+    : [];
+  return [...fromTerminal, ...fromPage].sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
 
 function renderChat() {
   const box = $('#msgs');
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   box.textContent = '';
-  if (chatMessages.length === 0) {
+  const items = timeline();
+  if (items.length === 0) {
     const p = document.createElement('p');
     p.className = 'empty';
     p.textContent = '평가하기 전에 궁금한 점을 물어보세요.\n작업 중인 시스템에 대한 것과 스킬(리뷰 페이지·진행 방식)에 대한 것을 아래에서 골라 보냅니다.';
     p.style.whiteSpace = 'pre-line';
     box.append(p);
   }
-  let lastRound = null;
-  for (const m of chatMessages) {
-    if (m.round && m.round !== lastRound) {
+  let lastDay = '';
+  for (const m of items) {
+    const day = new Date(m.at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' });
+    if (day !== lastDay) {
       const d = document.createElement('p');
       d.className = 'divider';
-      d.textContent = `${m.round}차 리뷰`;
+      d.textContent = day;
       box.append(d);
-      lastRound = m.round;
+      lastDay = day;
     }
     const div = document.createElement('div');
     div.className = 'msg ' + m.from;
     const tag = document.createElement('span');
     tag.className = 'tag';
-    tag.textContent = (m.target === 'skill' ? '스킬' : '시스템') + (m.context === 'app' ? ' · 앱 화면' : '');
+    const where = m.source === 'terminal' ? '터미널' : m.source === 'app' ? '앱 화면' : '리뷰';
+    tag.textContent = m.source === 'terminal' ? where : `${where} · ${m.target === 'skill' ? '스킬' : '시스템'}`;
     div.append(tag, m.text);
     const t = document.createElement('time');
-    t.textContent = (m.from === 'agent' ? (m.agent || '작업 세션') + ' · ' : '') + new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    t.textContent = (m.from === 'agent' ? (m.agent || '작업 세션') + ' · ' : '') +
+      new Date(m.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) + (m.round ? ` · ${m.round}차` : '');
     div.append(t);
     box.append(div);
   }
-  const last = chatMessages[chatMessages.length - 1];
-  if (last && last.from === 'user') {
+  const last = items[items.length - 1];
+  if (last && last.from === 'user' && last.source !== 'terminal') {
     const w = document.createElement('p');
     w.className = 'waiting';
     w.textContent = autoOn ? '작업 세션이 읽고 답하는 중…' : '자동으로 전달되지 않습니다. 터미널에 "대화 확인해"라고 보내 주세요.';
@@ -529,26 +543,35 @@ function renderChat() {
   }
   if (nearBottom) box.scrollTop = box.scrollHeight;
   $('#chatMode').dataset.auto = autoOn ? 'on' : 'off';
+  const mirror = transcript.registered ? '터미널 대화가 함께 보입니다. ' : '';
   $('#chatMode').textContent = autoOn
-    ? `${watch.agent}가 메시지를 바로 읽고 답합니다. 수정 요청은 다음 라운드에 반영합니다("지금 바로"라고 쓰면 즉시).`
-    : '작업 세션이 자동으로 읽지 않습니다. 보낸 뒤 터미널에 "대화 확인해"라고 알려 주세요.';
+    ? `${mirror}여기서 보낸 메시지는 바로 전달되고, 작업 세션(${watch.agent})이 답합니다. 작업 중이면 끝난 뒤 답합니다.`
+    : `${mirror}여기서 보낸 메시지는 자동으로 전달되지 않습니다. 보낸 뒤 터미널에 "대화 확인해"라고 알려 주세요.`;
   const open = !$('#chat').hidden;
-  const lastId = last ? last.id : 0;
-  if (open) {
-    seenId = lastId;
-    try { localStorage.setItem('chatSeen-' + REVIEW.project, String(seenId)); } catch {}
+  if (open && last) {
+    seenAt = String(last.at);
+    try { localStorage.setItem('chatSeenAt-' + REVIEW.project, seenAt); } catch {}
   }
-  const unread = chatMessages.filter((m) => m.from === 'agent' && m.id > seenId).length;
+  const unread = items.filter((m) => m.from === 'agent' && String(m.at) > seenAt).length;
   $('#chatBadge').hidden = unread === 0;
   $('#chatBadge').textContent = String(unread);
 }
 
+let chatKey = '';
 async function pollChat() {
   try {
-    const data = await (await fetch('/api/chat')).json();
-    const changed = (data.messages || []).length !== chatMessages.length;
-    chatMessages = data.messages || [];
-    if (changed) renderChat();
+    const [c, t] = await Promise.all([fetch('/api/chat').then((r) => r.json()), fetch('/api/transcript').then((r) => r.json())]);
+    chatMessages = c.messages || [];
+    transcript = t;
+    if (!seenAt) {
+      const items = timeline();
+      seenAt = items.length ? String(items[items.length - 1].at) : '0';
+    }
+    const key = chatMessages.length + ':' + (t.items || []).length + ':' + ((t.items || []).slice(-1)[0]?.id || '');
+    if (key !== chatKey) {
+      chatKey = key;
+      renderChat();
+    }
   } catch {}
 }
 

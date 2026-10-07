@@ -49,6 +49,69 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
 }
 
 const chatFile = path.join(root, 'chat.json');
+const sessionFile = path.join(root, 'session.json');
+const TAIL_BYTES = 4 * 1024 * 1024;
+let transcriptCache = { key: '', data: null };
+
+function stripTags(text) {
+  return text
+    .replace(/<system-reminder[^>]*>[\s\S]*?<\/system-reminder>/g, '')
+    .replace(/<(local-command-[a-z]+|command-[a-z]+)>[\s\S]*?<\/\1>/g, '')
+    .trim();
+}
+
+// register-session.mjs 가 등록한 세션 기록에서 사용자 입력과 에이전트 답만 뽑는다.
+// 도구 실행, 시스템 메시지, 다른 세션·하위 에이전트 메시지는 뺀다. 기록 형식은 Claude Code·Codex 내부 형식이다.
+function readTranscript() {
+  let session, st;
+  try {
+    session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    st = fs.statSync(session.path);
+  } catch {
+    return { registered: false, items: [] };
+  }
+  const key = `${session.path}:${st.size}:${st.mtimeMs}`;
+  if (transcriptCache.key === key) return transcriptCache.data;
+
+  const len = Math.min(st.size, TAIL_BYTES);
+  const fd = fs.openSync(session.path, 'r');
+  const buf = Buffer.alloc(len);
+  fs.readSync(fd, buf, 0, len, st.size - len);
+  fs.closeSync(fd);
+  const lines = buf.toString('utf8').split('\n');
+  if (len < st.size) lines.shift();
+
+  const items = [];
+  const push = (id, role, text, at) => {
+    const t = stripTags(text || '');
+    if (t) items.push({ id: String(id), role, text: t.slice(0, 8000), at, source: 'terminal' });
+  };
+  for (const line of lines) {
+    let o;
+    try {
+      o = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (session.tool === 'claude') {
+      if (o.isSidechain) continue;
+      const content = o.message?.content;
+      if (o.type === 'user' && o.origin?.kind === 'human' && typeof content === 'string') push(o.uuid, 'user', content, o.timestamp);
+      if (o.type === 'assistant' && Array.isArray(content)) {
+        push(o.uuid, 'agent', content.filter((b) => b.type === 'text').map((b) => b.text).join('\n'), o.timestamp);
+      }
+    } else {
+      const p = o.payload;
+      if (o.type !== 'response_item' || p?.type !== 'message' || !['user', 'assistant'].includes(p.role)) continue;
+      const text = (p.content || []).filter((b) => b.type === 'input_text' || b.type === 'output_text').map((b) => b.text).join('\n');
+      if (p.role === 'user' && (text.trimStart().startsWith('<') || text.includes('AGENTS.md instructions'))) continue;
+      push(p.id || o.ordinal, p.role === 'user' ? 'user' : 'agent', text, o.timestamp);
+    }
+  }
+  const data = { registered: true, tool: session.tool, agent: session.agent, items: items.slice(-300) };
+  transcriptCache = { key, data };
+  return data;
+}
 
 function readChat() {
   try {
@@ -89,6 +152,10 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/api/watch') {
     return send(res, 200, readWatch(url.searchParams.get('round') || ''));
+  }
+
+  if (url.pathname === '/api/transcript') {
+    return send(res, 200, readTranscript());
   }
 
   if (url.pathname === '/api/chat') {
