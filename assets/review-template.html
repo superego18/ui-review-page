@@ -580,6 +580,7 @@ function renderChat() {
   renderTabs();
   const box = $('#msgs');
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const prevTop = box.scrollTop;
   box.textContent = '';
   const items = timeline(activeTab);
   if (items.length === 0) {
@@ -611,6 +612,7 @@ function renderChat() {
     }
     const div = document.createElement('div');
     div.className = 'msg ' + m.from + (isUnread(m) ? ' unread' : '');
+    div.dataset.at = String(m.at);
     const tag = document.createElement('span');
     tag.className = 'tag';
     const where = m.context === 'terminal' ? '터미널' : m.context === 'app' ? '앱 화면' : m.context === 'reply' ? '답장' : '리뷰';
@@ -649,6 +651,8 @@ function renderChat() {
     scrollToUnread = false;
   } else if (nearBottom) {
     box.scrollTop = box.scrollHeight;
+  } else {
+    box.scrollTop = prevTop; // 다시 그려도 읽던 위치를 유지한다
   }
   $('#chatMode').dataset.auto = target?.watch?.active ? 'on' : 'off';
   $('#chatMode').textContent = !target
@@ -661,7 +665,7 @@ function renderChat() {
   $('#chatInput').disabled = !target;
   $('#sendBtn').disabled = !target;
   $('#chatInput').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '등록된 세션이 없습니다';
-  markReadIfAtBottom();
+  markSeenVisible();
   updateBadges();
 }
 
@@ -672,23 +676,26 @@ function updateBadges() {
   document.title = (unread ? `(${unread}) ` : '') + baseTitle;
 }
 
-// 지금 탭을 맨 아래까지 봤으면 그 세션을 읽음으로 바꾼다(다른 세션의 안 읽음은 그대로 둔다).
-function markReadIfAtBottom() {
+// 화면에 끝까지 보인(또는 지나간) 답을 읽음으로 바꾼다. 지금 탭의 세션만 바뀌고 다른 세션의 안 읽음은 그대로다.
+function markSeenVisible() {
   const box = $('#msgs');
-  if ($('#chat').hidden || !sessionById(activeTab)) return;
-  if (box.scrollHeight - box.scrollTop - box.clientHeight > 40) return;
-  const items = timeline(activeTab);
-  const last = items[items.length - 1];
-  if (last && String(last.at) > (seen[activeTab] || '')) {
-    seen[activeTab] = String(last.at);
-    saveSeen();
-    renderTabs();
-    updateBadges();
-    box.querySelectorAll('.unread').forEach((el) => el.classList.remove('unread'));
-    box.querySelectorAll('.newline').forEach((el) => el.remove());
+  if ($('#chat').hidden || document.hidden || !sessionById(activeTab)) return;
+  const limit = box.getBoundingClientRect().bottom + 4;
+  let at = seen[activeTab] || '';
+  for (const el of box.querySelectorAll('.msg.unread')) {
+    if (el.getBoundingClientRect().bottom > limit) continue;
+    el.classList.remove('unread');
+    if (el.dataset.at > at) at = el.dataset.at;
   }
+  if (at === (seen[activeTab] || '')) return;
+  seen[activeTab] = at;
+  saveSeen();
+  if (!box.querySelector('.msg.unread')) box.querySelectorAll('.divider.new').forEach((el) => el.remove());
+  renderTabs();
+  updateBadges();
 }
-$('#msgs').addEventListener('scroll', markReadIfAtBottom);
+$('#msgs').addEventListener('scroll', markSeenVisible);
+document.addEventListener('visibilitychange', markSeenVisible);
 
 // 창이 닫혀 있을 때 새 답이 오면 버튼 옆에 5초 동안 미리보기를 띄운다. 누르면 그 세션 탭으로 연다.
 const baseTitle = document.title;
