@@ -493,7 +493,7 @@ try { seenAt = localStorage.getItem('chatSeenAt-' + REVIEW.project) || ''; } cat
 
 // 대화 창 = 세션 터미널 대화(등록돼 있으면) + 페이지·앱 화면에서 보낸 메시지를 시간순으로 합친 것
 function timeline() {
-  const fromPage = chatMessages.map((m) => ({ ...m, source: m.context === 'app' ? 'app' : 'review' }));
+  const fromPage = chatMessages.map((m) => ({ ...m, source: m.context === 'terminal' ? 'terminal' : m.context === 'app' ? 'app' : 'review' }));
   const fromTerminal = transcript.registered
     ? transcript.items.map((m) => ({ id: 't' + m.id, from: m.role, text: m.text, at: m.at, source: 'terminal', agent: transcript.agent }))
     : [];
@@ -555,7 +555,7 @@ function renderChat() {
   }
   if (nearBottom) box.scrollTop = box.scrollHeight;
   $('#chatMode').dataset.auto = autoOn ? 'on' : 'off';
-  const mirror = transcript.registered ? '터미널 대화가 함께 보입니다. ' : '';
+  const mirror = transcript.registered || chatMessages.some((m) => m.context === 'terminal') ? '터미널 대화가 함께 보입니다. ' : '';
   $('#chatMode').textContent = autoOn
     ? `${mirror}여기서 보낸 메시지는 바로 전달되고, 작업 세션(${watch.agent})이 답합니다. 작업 중이면 끝난 뒤 답합니다.`
     : `${mirror}여기서 보낸 메시지는 자동으로 전달되지 않습니다. 보낸 뒤 터미널에 "대화 확인해"라고 알려 주세요.`;

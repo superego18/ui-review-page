@@ -70,6 +70,8 @@ function readTranscript() {
   } catch {
     return { registered: false, items: [] };
   }
+  // Claude 는 기록 파일에 일부 답이 빠지는 경우가 있어 쓰지 않는다. hook-relay.mjs 훅이 chat.json 으로 보낸다.
+  if (session.tool === 'claude') return { registered: false, items: [], via: 'hooks' };
   const key = `${session.path}:${st.size}:${st.mtimeMs}`;
   if (transcriptCache.key === key) return transcriptCache.data;
 
