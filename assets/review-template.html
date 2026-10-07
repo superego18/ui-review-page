@@ -97,6 +97,7 @@
   .msg { max-width: 85%; padding: 8px 11px; border-radius: 10px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
   .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
   .msg.agent { align-self: flex-start; background: var(--sheet); color: var(--ink); box-shadow: 0 0 0 1px var(--rule); border-bottom-left-radius: 3px; }
+  .msg code { font-family: var(--mono); font-size: 12px; background: rgba(127,127,127,.15); padding: 0 4px; border-radius: 4px; }
   .msg time { display: block; font-size: 10px; opacity: .7; margin-top: 3px; }
   .waiting { align-self: flex-start; font-size: 12px; color: var(--ink-3); }
   .compose { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--rule); }
@@ -499,6 +500,15 @@ function timeline() {
   return [...fromTerminal, ...fromPage].sort((a, b) => String(a.at).localeCompare(String(b.at)));
 }
 
+// 에이전트 답의 간단한 마크다운(굵게, 코드)만 표시한다. 먼저 HTML을 이스케이프해서 안전하게 만든다.
+function mdLite(text) {
+  const esc = text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  return esc
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/^#{1,6}\s+(.+)$/gm, '<strong>$1</strong>');
+}
+
 function renderChat() {
   const box = $('#msgs');
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
@@ -527,7 +537,9 @@ function renderChat() {
     tag.className = 'tag';
     const where = m.source === 'terminal' ? '터미널' : m.source === 'app' ? '앱 화면' : '리뷰';
     tag.textContent = m.source === 'terminal' ? where : `${where} · ${m.target === 'skill' ? '스킬' : '시스템'}`;
-    div.append(tag, m.text);
+    const body = document.createElement('span');
+    body.innerHTML = mdLite(m.text);
+    div.append(tag, body);
     const t = document.createElement('time');
     t.textContent = (m.from === 'agent' ? (m.agent || '작업 세션') + ' · ' : '') +
       new Date(m.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) + (m.round ? ` · ${m.round}차` : '');
