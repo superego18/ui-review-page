@@ -102,6 +102,15 @@
   .compose { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--rule); }
   .compose textarea { min-height: 40px; max-height: 120px; resize: none; }
   .compose button { flex-shrink: 0; white-space: nowrap; font: inherit; font-weight: 600; font-size: 14px; padding: 0 14px; border-radius: 8px; border: 0; background: var(--ink); color: var(--paper); cursor: pointer; }
+  .target { display: flex; gap: 4px; padding: 8px 10px 0; border-top: 1px solid var(--rule); align-items: center; font-size: 12px; color: var(--ink-3); }
+  .target button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; }
+  .target button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: transparent; }
+  .compose { border-top: 0 !important; }
+  .tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; }
+  .msg.user .tag { background: rgba(255,255,255,.22); color: #fff; }
+  .msg.agent .tag { background: var(--paper); color: var(--ink-2); }
+  .divider { align-self: stretch; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-3); margin: 6px 0 2px; }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
   .empty { margin: auto; text-align: center; font-size: 13px; color: var(--ink-3); line-height: 1.6; }
 </style>
 
@@ -125,8 +134,13 @@
 <section class="chat" id="chat" hidden aria-label="작업 세션과 대화">
   <header><b>작업 세션과 대화</b><p id="chatMode" data-auto="off"></p></header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
+  <div class="target" role="group" aria-label="고칠 대상">
+    고칠 대상
+    <button type="button" data-target="system" aria-pressed="true">작업 중인 시스템</button>
+    <button type="button" data-target="skill" aria-pressed="false">스킬(리뷰 방식)</button>
+  </div>
   <form class="compose" id="compose">
-    <textarea id="chatInput" rows="1" placeholder="메시지 입력 · Enter 보내기" aria-label="메시지"></textarea>
+    <textarea id="chatInput" rows="1" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea>
     <button type="submit">보내기</button>
   </form>
 </section>
@@ -482,15 +496,27 @@ function renderChat() {
   if (chatMessages.length === 0) {
     const p = document.createElement('p');
     p.className = 'empty';
-    p.textContent = '리뷰하면서 궁금한 점이나 요청을 보내 보세요.';
+    p.textContent = '평가하기 전에 궁금한 점을 물어보세요.\n작업 중인 시스템에 대한 것과 스킬(리뷰 페이지·진행 방식)에 대한 것을 아래에서 골라 보냅니다.';
+    p.style.whiteSpace = 'pre-line';
     box.append(p);
   }
+  let lastRound = null;
   for (const m of chatMessages) {
+    if (m.round && m.round !== lastRound) {
+      const d = document.createElement('p');
+      d.className = 'divider';
+      d.textContent = `${m.round}차 리뷰`;
+      box.append(d);
+      lastRound = m.round;
+    }
     const div = document.createElement('div');
     div.className = 'msg ' + m.from;
-    div.textContent = m.text;
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = (m.target === 'skill' ? '스킬' : '시스템') + (m.context === 'app' ? ' · 앱 화면' : '');
+    div.append(tag, m.text);
     const t = document.createElement('time');
-    t.textContent = (m.from === 'agent' ? (m.agent || '작업 세션') + ' · ' : '') + new Date(m.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) + (m.round ? ` · ${m.round}차` : '');
+    t.textContent = (m.from === 'agent' ? (m.agent || '작업 세션') + ' · ' : '') + new Date(m.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     div.append(t);
     box.append(div);
   }
@@ -537,13 +563,25 @@ $('#chatBtn').onclick = () => {
   }
 };
 
+let chatTarget = 'system';
+document.querySelectorAll('[data-target]').forEach((b) => {
+  b.onclick = () => {
+    chatTarget = b.dataset.target;
+    document.querySelectorAll('[data-target]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    $('#chatInput').placeholder = chatTarget === 'skill'
+      ? '스킬에 대한 의견 · Enter 보내기'
+      : '질문이나 요청 · Enter 보내기';
+    $('#chatInput').focus();
+  };
+});
+
 $('#compose').onsubmit = async (e) => {
   e.preventDefault();
   const text = $('#chatInput').value.trim();
   if (!text) return;
   $('#chatInput').value = '';
   try {
-    await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'user', text, round: REVIEW.round }) });
+    await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'user', text, round: REVIEW.round, target: chatTarget, context: 'review' }) });
     await pollChat();
     $('#msgs').scrollTop = $('#msgs').scrollHeight;
   } catch {

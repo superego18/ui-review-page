@@ -104,6 +104,8 @@ const server = http.createServer((req, res) => {
         const chat = readChat();
         const entry = { id: chat.messages.length + 1, from: msg.from, text, round: Number(msg.round) || null, at: new Date().toISOString() };
         if (msg.from === 'agent' && typeof msg.agent === 'string') entry.agent = msg.agent.slice(0, 40);
+        entry.target = msg.target === 'skill' ? 'skill' : 'system';
+        if (typeof msg.context === 'string') entry.context = msg.context.slice(0, 20);
         chat.messages.push(entry);
         fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
         send(res, 200, entry);
