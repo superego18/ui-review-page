@@ -79,7 +79,10 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === '/api/watch') {
-    return send(res, 200, readWatch(url.searchParams.get('round') ?? ''));
+    const round = url.searchParams.get('round');
+    if (round) return send(res, 200, readWatch(round));
+    const rounds = fs.readdirSync(root).map((f) => f.match(/^watch-r(\d+)\.json$/)?.[1]).filter(Boolean);
+    return send(res, 200, rounds.map(readWatch).find((w) => w.active) || { active: false });
   }
 
   if (url.pathname === '/api/chat') {
@@ -106,6 +109,12 @@ const server = http.createServer((req, res) => {
         if (msg.from === 'agent' && typeof msg.agent === 'string') entry.agent = msg.agent.slice(0, 40);
         entry.target = msg.target === 'skill' ? 'skill' : 'system';
         if (typeof msg.context === 'string') entry.context = msg.context.slice(0, 20);
+        if (msg.where && typeof msg.where === 'object') {
+          const w = msg.where;
+          const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined);
+          const num = (o) => (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).filter(([, v]) => Number.isFinite(v)).slice(0, 4)) : undefined);
+          entry.where = { url: str(w.url, 300), selector: str(w.selector, 300), text: str(w.text, 120), rect: num(w.rect), viewport: num(w.viewport) };
+        }
         chat.messages.push(entry);
         fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
         send(res, 200, entry);
