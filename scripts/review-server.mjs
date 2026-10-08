@@ -19,7 +19,13 @@ function arg(name, fallback) {
 }
 
 const root = path.resolve(arg('dir', '.ui-feedback'));
-const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'app-widget.js');
+const assetsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets');
+// 모든 리뷰 페이지가 함께 쓰는 공용 파일. 요청마다 새로 읽으므로 고치면 이미 만든 페이지도 새로고침만으로 바뀐다.
+const SHARED = {
+  '/__uifb/widget.js': ['app-widget.js', 'text/javascript; charset=utf-8'],
+  '/__uifb/review-page.js': ['review-page.js', 'text/javascript; charset=utf-8'],
+  '/__uifb/review-page.css': ['review-page.css', 'text/css; charset=utf-8'],
+};
 const port = Number(arg('port', '4799'));
 const MAX_BODY = 256 * 1024;
 const TYPES = {
@@ -336,9 +342,10 @@ const server = http.createServer((req, res) => {
 
   // 대화/피드백 위젯(assets/app-widget.js)은 앱 화면(app-proxy)과 리뷰 페이지가 같은 파일을 쓴다.
   // 위젯은 /__uifb/api/* 로 부르므로, 리뷰 서버에서는 앞의 /__uifb 를 떼고 같은 API 로 처리한다.
-  if (url.pathname === '/__uifb/widget.js') {
-    res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
-    return res.end(fs.readFileSync(widgetPath));
+  if (SHARED[url.pathname]) {
+    const [file, type] = SHARED[url.pathname];
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+    return res.end(fs.readFileSync(path.join(assetsDir, file)));
   }
   if (url.pathname.startsWith('/__uifb/api/')) url.pathname = url.pathname.slice('/__uifb'.length);
 
