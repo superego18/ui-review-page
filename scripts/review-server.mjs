@@ -143,6 +143,7 @@ function addChat(msg) {
   if (sid(msg.to)) entry.to = msg.to;
   if (sid(msg.session)) entry.session = msg.session;
   if (typeof msg.context === 'string') entry.context = msg.context.slice(0, 20);
+  if (msg.device === 'mobile' || msg.device === 'desktop') entry.device = msg.device;
   if (cleanWhere(msg.where)) entry.where = cleanWhere(msg.where);
   chat.messages.push(entry);
   fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
@@ -288,7 +289,7 @@ function draftText(d) {
   if (d.where?.url || d.where?.selector) {
     lines.push(`위치(${shortTime(d.at)} 저장${d.commit ? ` · 커밋 ${d.commit}` : ''} 기준): ${d.where.url || ''}${d.where.selector ? ' · ' + d.where.selector : ''}${d.where.text ? ` · 당시 문구 "${d.where.text}"` : ''}`);
   }
-  if (d.round) lines.push(`(${d.round}차 리뷰를 보다가 남김)`);
+  if (d.round || d.device) lines.push(`(${[d.round ? `${d.round}차 리뷰를 보다가` : '', d.device === 'mobile' ? '모바일에서' : d.device === 'desktop' ? '데스크톱에서' : ''].filter(Boolean).join(' ')} 남김)`);
   return lines.join('\n');
 }
 
@@ -310,7 +311,7 @@ function sendDrafts(ids, combine) {
       const text = `${label ? `[${label}] ` : ''}보관함에서 모아 보낸 ${list.length}개입니다.\n\n` + list.map((d, i) => `${i + 1}. ${draftText(d).replace(/\n/g, '\n   ')}`).join('\n\n');
       sent.push(addChat({ from: 'user', to, text, context: list.every((d) => d.context === 'review') ? 'review' : 'app' }));
     } else {
-      for (const d of list) sent.push(addChat({ from: 'user', to, text: (label ? `[${label}] ` : '') + draftText(d), context: d.context, round: d.round, where: d.where }));
+      for (const d of list) sent.push(addChat({ from: 'user', to, text: (label ? `[${label}] ` : '') + draftText(d), context: d.context, round: d.round, where: d.where, device: d.device }));
     }
   }
   store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
@@ -325,7 +326,7 @@ function handleDrafts(req) {
   if (req.action === 'add') {
     const text = typeof req.text === 'string' ? req.text.trim().slice(0, 4000) : '';
     if (!text || !sid(req.to)) return { status: 400, body: { error: 'text와 to(세션)가 필요합니다.' } };
-    const d = { id: store.nextId++, to: req.to, text, label: cleanLabel(req.label), context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString() };
+    const d = { id: store.nextId++, to: req.to, text, label: cleanLabel(req.label), device: req.device === 'mobile' ? 'mobile' : req.device === 'desktop' ? 'desktop' : null, context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString() };
     store.drafts.push(d);
     writeDrafts(store);
     return { status: 200, body: d };
@@ -364,7 +365,7 @@ function queueToCodex(session, entry) {
   const where = entry.where?.url || entry.where?.selector
     ? `\n위치: ${entry.where.url || ''}${entry.where.selector ? ' · ' + entry.where.selector : ''}${entry.where.text ? ' · "' + entry.where.text + '"' : ''}`
     : '';
-  const src = entry.context === 'app' ? '앱 화면' : '리뷰';
+  const src = (entry.context === 'app' ? '앱 화면' : '리뷰') + (entry.device === 'mobile' ? ' · 모바일' : entry.device === 'desktop' ? ' · 데스크톱' : '');
   queueText(session, `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] ${entry.text}${where}`);
 }
 
