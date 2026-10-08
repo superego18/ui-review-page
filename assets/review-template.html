@@ -516,6 +516,7 @@ try { activeTab = localStorage.getItem('chatTab-' + REVIEW.project); } catch {}
 // 세션마다 마지막으로 읽은 시각. 그 뒤에 온 에이전트 답이 "안 읽음"이다. 탭을 열고 맨 아래까지 봐야 읽음으로 바뀐다.
 let seen = {};
 try { seen = JSON.parse(localStorage.getItem('chatSeen-' + REVIEW.project) || '{}'); } catch {}
+if (!seen || typeof seen !== 'object' || Array.isArray(seen)) seen = {}; // 예전 버전은 숫자로 저장했다
 const saveSeen = () => { try { localStorage.setItem('chatSeen-' + REVIEW.project, JSON.stringify(seen)); } catch {} };
 const isUnread = (m) => m.from === 'agent' && !!m.session && String(m.at) > (seen[m.session] || '');
 const unreadOf = (sid) => timeline(sid).filter(isUnread).length;
