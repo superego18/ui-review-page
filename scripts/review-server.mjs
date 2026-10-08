@@ -173,6 +173,28 @@ function markSeen(updates) {
   return seen;
 }
 
+// ── 화면 설정 ──
+// 대화 창 크기·입력칸 높이. 두 화면이 함께 쓰고, 데스크톱과 모바일은 따로 둔다({ desktop: {...}, mobile: {...} }).
+const prefsFile = path.join(root, 'prefs.json');
+function readPrefs() {
+  try {
+    return JSON.parse(fs.readFileSync(prefsFile, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+function savePrefs(req) {
+  const device = req.device === 'mobile' ? 'mobile' : 'desktop';
+  const prefs = readPrefs();
+  const cur = prefs[device] || {};
+  const num = (v) => (Number.isFinite(v) && v > 0 && v < 5000 ? Math.round(v) : null);
+  if ('panel' in req) cur.panel = req.panel && num(req.panel.w) && num(req.panel.h) ? { w: num(req.panel.w), h: num(req.panel.h) } : null;
+  if ('inputH' in req) cur.inputH = num(req.inputH);
+  prefs[device] = cur;
+  fs.writeFileSync(prefsFile, JSON.stringify(prefs, null, 2) + '\n');
+  return prefs;
+}
+
 // ── 보관함 ──
 const draftsFile = path.join(root, 'drafts.json');
 const projectDir = path.dirname(root);
@@ -408,6 +430,26 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/api/transcript') {
     return send(res, 200, readTranscript(url.searchParams.get('session') || ''));
+  }
+
+  if (url.pathname === '/api/prefs') {
+    if (req.method === 'GET') return send(res, 200, readPrefs());
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > MAX_BODY) req.destroy();
+      });
+      req.on('end', () => {
+        try {
+          send(res, 200, savePrefs(JSON.parse(body)));
+        } catch {
+          send(res, 400, { error: 'JSON 형식이 아닙니다.' });
+        }
+      });
+      return;
+    }
+    return send(res, 405, { error: 'GET 또는 POST만 됩니다.' });
   }
 
   if (url.pathname === '/api/seen') {
