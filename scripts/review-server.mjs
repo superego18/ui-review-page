@@ -196,7 +196,8 @@ function savePrefs(req) {
   if ('inputH' in req) cur.inputH = num(req.inputH);
   if ('tab' in req && sid(req.tab)) prefs.tab = req.tab;
   // 보관함에 담을 때 마지막으로 고른 분류(두 화면 공용)
-  if ('draftLabel' in req) prefs.draftLabel = typeof req.draftLabel === 'string' && req.draftLabel.trim() ? req.draftLabel.trim().slice(0, 30) : null;
+  // 세션마다 따로 둔다(분류는 세션마다 다르다).
+  if ('draftLabel' in req && sid(req.session)) prefs.draftLabels = { ...(prefs.draftLabels || {}), [req.session]: typeof req.draftLabel === 'string' && req.draftLabel.trim() ? req.draftLabel.trim().slice(0, 30) : null };
   // 세션마다 보고 있던 메시지(맨 위에 보이던 메시지 id, 맨 아래면 'bottom'). 화면 폭과 상관없이 같은 메시지로 돌아간다.
   if (req.pos && sid(req.pos.session) && typeof req.pos.id === 'string' && req.pos.id.length < 80) prefs.pos = { ...(prefs.pos || {}), [req.pos.session]: req.pos.id };
   if ('panel' in req || 'inputH' in req) prefs[device] = cur;
