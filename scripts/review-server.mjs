@@ -306,7 +306,7 @@ function sendDrafts(ids, combine) {
   const sent = [];
   for (const list of groups.values()) {
     const to = list[0].to;
-    const label = list[0].label;
+    const label = list[0].label || '미분류'; // 분류 없이 담은 것도 [미분류]로 붙여 받는 세션이 묶음을 알게 한다
     if (combine && list.length > 1) {
       const text = `${label ? `[${label}] ` : ''}보관함에서 모아 보낸 ${list.length}개입니다.\n\n` + list.map((d, i) => `${i + 1}. ${draftText(d).replace(/\n/g, '\n   ')}`).join('\n\n');
       sent.push(addChat({ from: 'user', to, text, context: list.every((d) => d.context === 'review') ? 'review' : 'app' }));
