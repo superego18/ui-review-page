@@ -98,6 +98,8 @@
   .chatbtn { position: fixed; right: 20px; bottom: 20px; z-index: 20; font: inherit; font-weight: 600; font-size: 14px; padding: 11px 16px; border-radius: 999px; border: 0; background: var(--ink); color: var(--paper); cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.2); display: flex; gap: 8px; align-items: center; }
   .chatbtn .badge { min-width: 18px; height: 18px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 11px; line-height: 18px; text-align: center; padding: 0 5px; }
   .chat { position: fixed; right: 20px; bottom: 76px; z-index: 20; width: min(380px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--sheet); border-radius: 12px; box-shadow: 0 0 0 1px var(--rule), 0 12px 32px rgba(0,0,0,.18); display: flex; flex-direction: column; overflow: hidden; }
+  .grip { position: absolute; left: 0; top: 0; width: 18px; height: 18px; cursor: nwse-resize; z-index: 2; touch-action: none; }
+  .grip::after { content: ''; position: absolute; left: 4px; top: 4px; width: 8px; height: 8px; border-left: 2px solid var(--ink-3); border-top: 2px solid var(--ink-3); border-radius: 3px 0 0 0; opacity: .6; }
   .chat header { padding: 12px 14px; border-bottom: 1px solid var(--rule); }
   .chat header b { font-size: 14px; }
   .chat header p { margin: 2px 0 0; font-size: 12px; line-height: 1.45; }
@@ -181,6 +183,7 @@
 <div class="peek" id="peek" hidden role="status"></div>
 <button class="chatbtn" id="chatBtn" type="button" aria-expanded="false" aria-controls="chat">대화<span class="badge" id="chatBadge" hidden></span></button>
 <section class="chat" id="chat" hidden aria-label="세션과 대화">
+  <div class="grip" id="grip" title="끌어서 크기 조절 · 두 번 누르면 원래 크기" aria-hidden="true"></div>
   <header>
     <b>세션과 대화</b>
     <div class="tabs" id="tabs" role="tablist" aria-label="세션"></div>
@@ -1000,6 +1003,30 @@ $('#laterBtn').onclick = async () => {
     $('#chatInput').value = text;
   }
 };
+
+// 왼쪽 위 손잡이를 끌어 대화 창 크기를 바꾼다(창은 오른쪽 아래에 붙어 있다). 크기는 이 브라우저에 기억한다.
+function applyChatSize(sz) {
+  if (!sz) return;
+  $('#chat').style.width = Math.min(Math.max(300, sz.w), innerWidth - 32) + 'px';
+  $('#chat').style.height = Math.min(Math.max(320, sz.h), innerHeight - 100) + 'px';
+}
+let chatSize = null;
+try { chatSize = JSON.parse(localStorage.getItem('chatSize') || 'null'); } catch {}
+applyChatSize(chatSize);
+addEventListener('resize', () => applyChatSize(chatSize));
+$('#grip').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const r = $('#chat').getBoundingClientRect();
+  const start = { x: e.clientX, y: e.clientY, w: r.width, h: r.height };
+  $('#grip').setPointerCapture(e.pointerId);
+  const move = (ev) => { chatSize = { w: start.w - (ev.clientX - start.x), h: start.h - (ev.clientY - start.y) }; applyChatSize(chatSize); };
+  $('#grip').addEventListener('pointermove', move);
+  $('#grip').addEventListener('pointerup', () => {
+    $('#grip').removeEventListener('pointermove', move);
+    try { localStorage.setItem('chatSize', JSON.stringify(chatSize)); } catch {}
+  }, { once: true });
+});
+$('#grip').addEventListener('dblclick', () => { chatSize = null; $('#chat').style.width = ''; $('#chat').style.height = ''; try { localStorage.removeItem('chatSize'); } catch {} });
 
 pollChat();
 setInterval(pollChat, 3000);
