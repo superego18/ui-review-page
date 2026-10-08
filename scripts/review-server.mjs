@@ -53,7 +53,7 @@ function feedbackFile(round) {
 // 평가 파일을 대화에 남길 짧은 글로. 항목마다 고른 평가·한 줄 의견·핀 수.
 const VERDICTS = { good: '좋음', tweak: '수정 필요', revert: '되돌리기' };
 function feedbackSummary(data, round, name) {
-  const lines = [`[평가 완료] ${name || (/^\d+$/.test(round) ? `${round}차 리뷰` : round)}`];
+  const lines = [`[평가 완료] ${name || (/^\d+$/.test(round) ? `${round}차 비교` : round)}`];
   for (const [id, it] of Object.entries(data.items || {})) {
     const pins = (it.pins || []).filter((p) => p.note);
     lines.push(`- ${it.title || id}: ${VERDICTS[it.verdict] || it.verdict || '평가 없음'}${it.memo ? ` · ${it.memo.trim()}` : ''}${pins.length ? ` · 핀 ${pins.map((p) => p.note).join(' / ')}` : ''}`);
@@ -303,7 +303,7 @@ function draftText(d) {
   if (d.where?.url || d.where?.selector) {
     lines.push(`위치(${shortTime(d.at)} 저장${d.commit ? ` · 커밋 ${d.commit}` : ''} 기준): ${d.where.url || ''}${d.where.selector ? ' · ' + d.where.selector : ''}${d.where.text ? ` · 당시 문구 "${d.where.text}"` : ''}`);
   }
-  if (d.round || d.device) lines.push(`(${[d.round ? `${d.round}차 리뷰를 보다가` : '', d.device === 'mobile' ? '모바일에서' : d.device === 'desktop' ? '데스크톱에서' : ''].filter(Boolean).join(' ')} 남김)`);
+  if (d.round || d.device) lines.push(`(${[d.round ? `${d.round}차 비교 페이지를 보다가` : '', d.device === 'mobile' ? '모바일에서' : d.device === 'desktop' ? '데스크톱에서' : ''].filter(Boolean).join(' ')} 남김)`);
   return lines.join('\n');
 }
 
@@ -380,7 +380,7 @@ function queueToCodex(session, entry) {
   const where = entry.where?.url || entry.where?.selector
     ? `\n위치: ${entry.where.url || ''}${entry.where.selector ? ' · ' + entry.where.selector : ''}${entry.where.text ? ' · "' + entry.where.text + '"' : ''}`
     : '';
-  const src = (entry.context === 'app' ? '앱 화면' : '리뷰') + (entry.device === 'mobile' ? ' · 모바일' : entry.device === 'desktop' ? ' · 데스크톱' : '');
+  const src = (entry.context === 'app' ? '앱 화면' : '비교 페이지') + (entry.device === 'mobile' ? ' · 모바일' : entry.device === 'desktop' ? ' · 데스크톱' : '');
   queueText(session, `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] ${entry.text}${where}`);
 }
 
@@ -678,7 +678,7 @@ const server = http.createServer((req, res) => {
         // 완료한 평가를 대화에도 남긴다. 어느 페이지(라운드 리뷰든 비교 페이지든)에서 평가했는지와 상관없이 대화창에서 보이고, 그 세션의 대화 감시가 받는다.
         if (newlyDone && reviewer) addChat({ from: 'user', to: reviewer.sessionId, context: 'review', round, noQueue: true, text: feedbackSummary(data, round, typeof patch.name === 'string' ? patch.name : '') });
         if (reviewer?.tool === 'codex') {
-          queueText(reviewer, `${QUEUE_PREFIX}리뷰 · ${round}차] 피드백 확인해. 사용자가 ${round}차 리뷰 완료를 표시했습니다. .ui-feedback/r${round}.json 을 읽고 ui-feedback-loop 5단계대로 반영하세요.`);
+          queueText(reviewer, `${QUEUE_PREFIX}비교 페이지 · ${round}차] 피드백 확인해. 사용자가 ${round}차 비교 페이지에서 평가 완료를 표시했습니다. .ui-feedback/r${round}.json 을 읽고 ui-feedback-loop 5단계대로 반영하세요.`);
         }
         send(res, 200, { ok: true });
       });
@@ -704,7 +704,7 @@ server.on('error', (err) => {
 });
 
 server.listen(port, auth.host, () => {
-  console.log(`리뷰 페이지: http://localhost:${port}/`);
+  console.log(`비교 페이지: http://localhost:${port}/`);
   for (const u of auth.urls(port)) console.log(`다른 기기(폰)에서: ${u}`);
   console.log(`평가 저장 위치: ${root}${path.sep}r<round>.json`);
 });

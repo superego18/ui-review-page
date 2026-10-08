@@ -407,7 +407,7 @@ async function save(id, patch) {
   try {
     await post({ id, fields: { ...patch, title: ITEMS.find((i) => i.id === id)?.title ?? id } });
     el.textContent = '저장됨';
-  } catch (e) { el.textContent = '저장 실패 — 리뷰 서버가 켜져 있는지 확인하세요'; }
+  } catch (e) { el.textContent = '저장 실패 — 서버가 켜져 있는지 확인하세요'; }
 }
 
 let overallT;
@@ -462,11 +462,11 @@ $('#done').onclick = async () => {
     $('#doneNote').textContent = autoAtDone
       ? `완료로 표시했습니다. ${watch.agent}가 이어서 작업합니다. 터미널에 보낼 메시지는 없습니다.`
       : '완료로 표시했습니다. 이제 터미널에 "피드백 확인해"라고 보내 주세요.';
-  } catch (e) { finished = false; $('#doneNote').textContent = '저장 실패 — 리뷰 서버가 켜져 있는지 확인하세요.'; $('#done').disabled = false; }
+  } catch (e) { finished = false; $('#doneNote').textContent = '저장 실패 — 서버가 켜져 있는지 확인하세요.'; $('#done').disabled = false; }
 };
 
 $('#title').textContent = document.title;
-$('#eyebrow').textContent = `${REVIEW.project} · ${REVIEW.name || `${REVIEW.round}차 리뷰`}`;
+$('#eyebrow').textContent = `${REVIEW.project} · ${REVIEW.name || `${REVIEW.round}차 비교`}`;
 render();
 
 (async () => {
@@ -475,8 +475,8 @@ render();
     const data = await res.json();
     Object.assign(state, data.items || {});
     $('#overall').value = data.overall || '';
-    if (data.done) { finished = true; $('#done').disabled = true; $('#doneNote').textContent = '이미 완료로 표시된 리뷰입니다. 작업이 이어지지 않았다면 터미널에 "피드백 확인해"라고 보내 주세요.'; }
+    if (data.done) { finished = true; $('#done').disabled = true; $('#doneNote').textContent = '이미 완료로 표시된 비교 페이지입니다. 작업이 이어지지 않았다면 터미널에 "피드백 확인해"라고 보내 주세요.'; }
     $('#conn').textContent = '선택하면 자동 저장됩니다.';
     render();
-  } catch (e) { $('#conn').textContent = '리뷰 서버에 연결되지 않았습니다. 터미널에서 서버를 켜 주세요.'; }
+  } catch (e) { $('#conn').textContent = '서버에 연결되지 않았습니다. 터미널에서 서버를 켜 주세요.'; }
 })();
