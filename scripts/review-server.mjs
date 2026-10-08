@@ -145,6 +145,9 @@ function addChat(msg) {
   fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
   const target = entry.from === 'user' && entry.to ? findSession(entry.to) : null;
   if (target?.tool === 'codex') queueToCodex(target, entry);
+  // 사용자가 터미널이나 화면에서 그 세션에 말을 걸었다면 그때까지의 답은 읽은 것이다.
+  const talkedTo = entry.from === 'user' ? entry.session || entry.to : null;
+  if (talkedTo) markSeen({ [talkedTo]: entry.at });
   return entry;
 }
 
