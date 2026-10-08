@@ -161,7 +161,7 @@ function addChat(msg) {
   chat.messages.push(entry);
   fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
   const target = entry.from === 'user' && entry.to ? findSession(entry.to) : null;
-  if (target?.tool === 'codex' && !msg.noQueue) queueToCodex(target, entry); // noQueue: 서버가 따로 넣는 글(리뷰 완료)이 있어 두 번 넣지 않는다
+  if (target?.tool === 'codex' && !msg.noQueue) { queueToCodex(target, entry); markDelivered(target.sessionId, entry.id); } // noQueue: 서버가 따로 넣는 글(리뷰 완료)이 있어 두 번 넣지 않는다
   // 사용자가 터미널이나 화면에서 그 세션에 말을 걸었다면 그때까지의 답은 읽은 것이다.
   const talkedTo = entry.from === 'user' ? entry.session || entry.to : null;
   if (talkedTo) markSeen({ [talkedTo]: entry.at });
@@ -170,6 +170,16 @@ function addChat(msg) {
 
 // ── 읽음 상태 ──
 // 세션마다 사용자가 마지막으로 읽은 답의 시각. 앱 화면(4798)과 리뷰 페이지(4799)는 주소가 달라 브라우저 저장소를 함께 못 쓰므로 서버에 둔다.
+// 세션이 받아 간 마지막 메시지 번호. Claude 는 대화 감시(wait-review)가 메시지를 넘길 때, Codex 는 codex queue 에 넣을 때 적는다.
+const deliveredFile = path.join(root, 'delivered.json');
+function readDelivered() {
+  try { return JSON.parse(fs.readFileSync(deliveredFile, 'utf8')); } catch { return {}; }
+}
+function markDelivered(id, msgId) {
+  const d = readDelivered();
+  if (!(d[id] >= msgId)) fs.writeFileSync(deliveredFile, JSON.stringify({ ...d, [id]: msgId }, null, 2) + '\n');
+}
+
 const seenFile = path.join(root, 'seen.json');
 function readSeen() {
   try {
@@ -622,7 +632,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === '/api/chat') {
-    if (req.method === 'GET') return send(res, 200, readChat());
+    if (req.method === 'GET') return send(res, 200, { ...readChat(), delivered: readDelivered() });
     if (req.method === 'POST') {
       let body = '';
       req.on('data', (chunk) => {
