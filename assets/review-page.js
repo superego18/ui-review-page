@@ -53,6 +53,13 @@ function sourceLine(source) {
     p.className = 'src';
     const at = source.at ? new Date(source.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
     p.textContent = [source.url && source.url.replace(/^https?:\/\/[^/]+/, ''), source.viewport, source.theme, at, source.note].filter(Boolean).join(' · ');
+    // 예시 응답으로 찍었으면 실제 데이터 화면으로 오해하지 않게 따로 눈에 띄게 적는다.
+    if (source.mocked?.length || source.steps) {
+      const w = document.createElement('span');
+      w.className = 'mocked';
+      w.textContent = [source.mocked?.length ? `예시 데이터: ${source.mocked.join(', ')}` : '', source.steps ? '조작 후 캡처' : ''].filter(Boolean).join(' · ');
+      p.append(document.createElement('br'), w);
+    }
   }
   return p;
 }

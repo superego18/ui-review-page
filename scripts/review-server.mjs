@@ -198,6 +198,36 @@ function savePrefs(req) {
   return prefs;
 }
 
+// ── 캡처 기록 ──
+// make-capture.mjs 로 만든 캡처가 찍을 때마다 남긴다. 이미지 파일마다 한 줄(같은 파일을 다시 찍으면 덮어씀)이라
+// 이미지 수보다 늘지 않고, 레시피·차수·예시 응답 여부로 어떤 조건에서 찍었는지 추적한다. 오래된 이미지 정리는 prune-captures.mjs.
+const capturesFile = path.join(root, 'captures.json');
+function readCaptures() {
+  try {
+    return JSON.parse(fs.readFileSync(capturesFile, 'utf8'));
+  } catch {
+    return { shots: {} };
+  }
+}
+function recordCapture(r) {
+  if (typeof r.file !== 'string' || !/^[\w가-힣.-]{1,120}\.png$/.test(r.file)) return null;
+  const db = readCaptures();
+  const src = r.source && typeof r.source === 'object' ? r.source : {};
+  db.shots[r.file] = {
+    round: Number(r.round) || null,
+    recipe: typeof src.recipe === 'string' ? src.recipe.slice(0, 60) : null,
+    url: typeof src.url === 'string' ? src.url.slice(0, 300) : null,
+    viewport: typeof src.viewport === 'string' ? src.viewport.slice(0, 20) : null,
+    theme: src.theme === 'dark' ? 'dark' : 'light',
+    mocked: Array.isArray(src.mocked) ? src.mocked.slice(0, 20).map((m) => String(m).slice(0, 120)) : [],
+    steps: !!src.steps,
+    marks: Array.isArray(r.marks) ? r.marks.length : 0,
+    at: new Date().toISOString(),
+  };
+  fs.writeFileSync(capturesFile, JSON.stringify(db, null, 2) + '\n');
+  return db.shots[r.file];
+}
+
 // ── 쓰던 글 ──
 // 세션 탭마다 입력칸에 쓰다가 아직 보내지 않은 글. 새로고침해도 남고, 앱 화면·리뷰 페이지에서 이어 쓸 수 있다.
 const composeFile = path.join(root, 'compose.json');
@@ -453,6 +483,27 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/api/transcript') {
     return send(res, 200, readTranscript(url.searchParams.get('session') || ''));
+  }
+
+  if (url.pathname === '/api/captures') {
+    if (req.method === 'GET') return send(res, 200, readCaptures());
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > MAX_BODY) req.destroy();
+      });
+      req.on('end', () => {
+        try {
+          const rec = recordCapture(JSON.parse(body));
+          send(res, rec ? 200 : 400, rec || { error: 'file(.png)이 필요합니다.' });
+        } catch {
+          send(res, 400, { error: 'JSON 형식이 아닙니다.' });
+        }
+      });
+      return;
+    }
+    return send(res, 405, { error: 'GET 또는 POST만 됩니다.' });
   }
 
   if (url.pathname === '/api/compose') {

@@ -1,26 +1,31 @@
-// 2배 해상도 캡처. Playwright MCP의 browser_run_code_unsafe에 이 함수를 그대로 넘긴다.
-// 맨 위 다섯 값만 바꾼다. 페이지는 미리 열어 두지 않아도 된다(URL로 연다).
+// 2배 해상도 캡처 틀. 직접 고치지 않는다: scripts/make-capture.mjs 가 화면별 레시피(.ui-feedback/captures/<이름>.js)를
+// 이 틀의 RECIPE·META 자리에 넣어 .ui-feedback/capture.js 를 만들고, 그 파일을 Playwright MCP browser_run_code_unsafe 의 filename 으로 넘긴다.
 // 돌려주는 image 객체({ file, marks, source })를 리뷰 페이지 REVIEW 항목의 before/after 에 그대로 넣는다.
+// 찍은 기록(레시피·차수·예시 응답 여부)은 리뷰 서버 캡처 기록(captures.json)에 남는다.
 // page.screenshot은 화면 배율을 1로 고정하므로, CDP로 배율 2를 걸고 직접 찍는다.
 // 실행 환경에서 fs를 쓸 수 없고, 다운로드 저장은 새 브라우저 첫 실행에서 page가 닫히는 문제가 있어서
 // 찍은 이미지를 같은 페이지에 원본 크기로 띄운 뒤 page.screenshot(배율 1)으로 픽셀 그대로 저장한다.
 async (page) => {
-  const URL_ = 'http://localhost:3001/';
-  const OUT = '/절대경로/.ui-feedback/r1-화면.png';
-  const VIEWPORT = { width: 1440, height: 900 }; // 모바일은 { width: 390, height: 844 }
-  const SELECTOR = null; // 특정 영역만 찍으려면 CSS 선택자, 한 화면 전체면 null
-  const MARKS = []; // 번호 상자: [{ n: 1, selector: '.summary' }, …]. 찍는 순간의 위치를 이미지 기준 %로 잰다
+  const RECIPE = __RECIPE__;
+  const META = __META__;
+  const URL_ = new URL(RECIPE.url, META.base).href;
+  const VIEWPORT = RECIPE.viewport;
+  const SELECTOR = RECIPE.selector || null;
+  const MARKS = RECIPE.marks || [];
+  const MOCKS = RECIPE.mocks || [];
 
   // 앞선 캡처에서 건 예시 응답(page.route)이 남아 있으면 실제 데이터 화면에 섞이므로 먼저 지운다.
   await page.unrouteAll({ behavior: 'ignoreErrors' });
-  // API 응답을 흉내 내야 하면 여기서 page.route(...)를 goto 전에 건다. 스크립트가 끝나면 다시 지운다.
+  // 레시피의 예시 응답. json 이면 그대로 돌려주고, handle 이 있으면 그 함수로 처리한다.
+  for (const m of MOCKS) await page.route(m.url, m.handle || ((route) => route.fulfill({ json: m.json })));
   await page.setViewportSize(VIEWPORT);
   await page.goto(URL_);
   await page.waitForLoadState('networkidle');
-  // 버튼 클릭·입력처럼 캡처 전에 화면 상태를 만들어야 하면 여기에 넣는다.
+  // 버튼 클릭·입력처럼 캡처 전에 화면 상태를 만드는 단계
+  if (RECIPE.steps) await RECIPE.steps(page);
 
   const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Emulation.setDeviceMetricsOverride', { ...VIEWPORT, deviceScaleFactor: 2, mobile: false });
+  await cdp.send('Emulation.setDeviceMetricsOverride', { ...VIEWPORT, deviceScaleFactor: 2, mobile: VIEWPORT.width < 768 });
   let clip;
   let region = null; // 찍는 영역(문서 좌표). null 이면 지금 보이는 화면
   if (SELECTOR) {
@@ -76,16 +81,27 @@ async (page) => {
     await document.getElementById('shot').decode();
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   });
-  await page.screenshot({ path: OUT, clip: { x: 0, y: 0, ...size } });
+  await page.screenshot({ path: META.out, clip: { x: 0, y: 0, ...size } });
 
   // CDP 해제 뒤 Playwright가 크기를 그대로라고 보고 무시하므로, 한 번 바꿨다가 되돌린다.
   await page.setViewportSize({ width: VIEWPORT.width + 1, height: VIEWPORT.height });
   await page.setViewportSize(VIEWPORT);
   await page.unrouteAll({ behavior: 'ignoreErrors' });
   const image = {
-    file: OUT.split(/[\\/]/).pop(),
+    file: META.file,
     ...(measured.marks.length ? { marks: measured.marks } : {}),
-    source: { url: measured.url, viewport: `${VIEWPORT.width}×${VIEWPORT.height}`, theme: measured.theme, at: new Date().toISOString() },
+    source: {
+      url: measured.url,
+      viewport: `${VIEWPORT.width}×${VIEWPORT.height}`,
+      theme: measured.theme,
+      at: new Date().toISOString(),
+      recipe: META.recipe,
+      // 예시 응답으로 바꾼 API. 리뷰 페이지에 "예시 데이터"로 보인다.
+      ...(MOCKS.length ? { mocked: MOCKS.map((m) => m.label || m.url) } : {}),
+      ...(RECIPE.steps ? { steps: true } : {}),
+    },
   };
-  return { saved: OUT, pixels: size, image, ...(measured.missing.length ? { missingMarks: measured.missing } : {}) };
+  // 찍은 기록을 리뷰 서버 캡처 기록에 남긴다(같은 파일은 덮어쓴다).
+  await page.request.post(META.record, { data: { round: META.round, ...image } }).catch(() => {});
+  return { saved: META.out, pixels: size, image, ...(measured.missing.length ? { missingMarks: measured.missing } : {}) };
 }
