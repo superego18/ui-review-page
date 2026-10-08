@@ -481,7 +481,7 @@ function renderMode() {
     $('#modeTitle').textContent = `자동 이어가기 · ${watch.agent}가 피드백을 받아 작업을 이어갑니다`;
     $('#modeSub').textContent = '터미널에 보낼 메시지는 없습니다.';
   } else if (auto) {
-    $('#modeTitle').textContent = `자동 이어가기 켜짐 · ${watch.agent}가 기다리는 중 (${time(watch.expiresAt)}까지)`;
+    $('#modeTitle').textContent = `자동 이어가기 켜짐 · ${watch.agent}가 기다리는 중${watch.expiresAt ? ` (${time(watch.expiresAt)}까지)` : ''}`;
     $('#modeSub').textContent = '완료 표시만 누르면 바로 이어서 작업합니다. 터미널에 메시지를 보낼 필요가 없습니다.';
   } else {
     $('#modeTitle').textContent = '자동 이어가기 꺼짐';
