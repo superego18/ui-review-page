@@ -9,7 +9,7 @@
   <header>
     <div class="eyebrow" id="eyebrow"></div>
     <h1 id="title"></h1>
-    <p>항목마다 <strong>좋음 / 수정 필요 / 되돌리기</strong> 중 하나를 고르고, 필요하면 한 줄 남겨 주세요. 선택은 이 프로젝트의 <code>.ui-feedback/</code> 폴더에 바로 저장됩니다. 이미지를 누르면 크게 보이고, 크게 본 이미지 위를 누르면 그 위치에 핀을 찍어 메모할 수 있습니다.</p>
+    <p>항목마다 평가를 하나 고르고, 필요하면 한 줄 남겨 주세요. 선택은 이 프로젝트의 <code>.ui-feedback/</code> 폴더에 바로 저장됩니다. 이미지를 누르면 크게 보이고, 크게 본 이미지 위를 누르면 그 위치에 핀을 찍어 메모할 수 있습니다.</p>
   </header>
   <div class="mode" id="mode" data-auto="off"><span class="dot"></span><div><b id="modeTitle">확인 중…</b><span class="sub" id="modeSub"></span></div></div>
   <div class="status" id="status"><span class="pill" id="count"></span><span id="conn">불러오는 중…</span></div>
@@ -40,7 +40,8 @@
 // ── 매 라운드 이 블록만 바꾼다 ──
 const REVIEW = {
   project: '__PROJECT__',
-  round: 1,
+  round: 1, // 라운드 번호. 라운드와 상관없는 비교 페이지는 'chips' 같은 영문 id 를 쓰고 name 에 이름을 준다
+  // name: '분류 칩 비교',
   session: '__SESSION__', // 이 리뷰를 반영하는 세션 이름(register-session --name). Codex 세션이면 완료 표시 때 바로 깨워 이어서 작업하게 한다
   scale: 2, // 캡처 배율. capture-2x.js로 찍었으면 2, page.screenshot으로 찍었으면 1
   items: [
@@ -49,6 +50,11 @@ const REVIEW = {
     // { id: 'list', title: '목록 정리', changes: ['1 제목 줄을 한 줄로', '2 버튼을 오른쪽 위로'],
     //   before: [{ file: 'before-list.png', marks: [{ n: 1, x: 3, y: 10, w: 60, h: 8 }], source: { url: '/list', viewport: '1440×900', theme: 'light', at: '…' } }],
     //   after: [{ file: 'after-list.png', marks: [...], source: {...} }] },
+    // 추천안끼리·다른 사람 결과물과 비교할 때: before/after 대신 options. 평가는 안 이름 중 하나(+ 다른 방향)로 고른다.
+    // 움직임·누르는 감각을 봐야 하면 shots 대신 demo 에 실제로 동작하는 HTML 경로를 준다.
+    // { id: 'chips', title: '분류 칩 동작', changes: ['…'], options: [
+    //   { label: 'A안', note: '짧게 누르면 열기', demo: 'demo-chips.html?mode=A' },
+    //   { label: '다른 서비스', shots: [{ file: 'other.png', source: { direct: false, note: '…' } }] } ] },
     // 직접 찍지 않은 이미지(과거 캡처·다른 도구)는 source: { direct: false, note: '10/7 기존 도구 캡처, 창 크기 다름' }, marks 는 눈으로 % 를 적는다.
   ],
 };
@@ -57,6 +63,6 @@ const REVIEW = {
 <!-- 화면 동작은 리뷰 서버가 내보내는 공용 파일을 쓴다. 고칠 때는 assets/review-page.js·review-page.css 를 고친다. -->
 <script src="/__uifb/review-page.js"></script>
 <!-- 대화/피드백 창은 앱 화면과 같은 위젯(assets/app-widget.js)을 리뷰 서버가 내보낸다. 이 페이지에는 대화 코드를 두지 않는다. -->
-<script>window.__uifbConfig = { context: 'review', round: REVIEW.round, label: `${REVIEW.round}차 리뷰`, pick: true };</script>
+<script>window.__uifbConfig = { context: 'review', round: REVIEW.round, label: REVIEW.name || `${REVIEW.round}차 리뷰`, pick: true };</script>
 <script src="/__uifb/widget.js" defer></script>
 </html>

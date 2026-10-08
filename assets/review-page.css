@@ -1,5 +1,5 @@
 /* 리뷰 페이지 화면. review-template.html 로 만든 모든 리뷰 페이지가 리뷰 서버(/__uifb/review-page.css)에서 받아 쓴다. */
-/* Layout: one column of review items, each = before/after images + a verdict row */
+/* Layout: one column of review items, each = UI options to compare (images or live demos) + a verdict row */
 :root {
   --paper: #f6f5f1; --sheet: #ffffff; --ink: #1c1b18; --ink-2: #5a5852; --ink-3: #8f8c84;
   --rule: rgba(28,27,24,.12); --accent: #4f46e5; --accent-soft: #eef0ff;
@@ -43,6 +43,10 @@ figure.tall img { max-height: 640px; width: auto; max-width: 100%; }
 .opt[aria-pressed="true"][data-v="good"] { background: var(--good-soft); color: var(--good); border-color: transparent; font-weight: 600; }
 .opt[aria-pressed="true"][data-v="tweak"] { background: var(--warn-soft); color: var(--warn); border-color: transparent; font-weight: 600; }
 .opt[aria-pressed="true"][data-v="revert"] { background: var(--bad-soft); color: var(--bad); border-color: transparent; font-weight: 600; }
+.opt.pick[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: transparent; font-weight: 600; }
+.optnote { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
+figcaption a { margin-left: auto; color: var(--accent); }
+.demo iframe { width: 100%; height: 700px; border: 0; border-radius: 12px; background: var(--paper); outline: 1px solid var(--rule); outline-offset: -1px; }
 textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; color: var(--ink); background: var(--paper); border: 1px solid var(--rule); border-radius: 7px; padding: 9px 11px; resize: vertical; min-height: 44px; line-height: 1.5; }
 textarea:focus, .opt:focus-visible, .send:focus-visible, figure button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .saved { font-size: 12px; color: var(--ink-3); margin-left: auto; font-variant-numeric: tabular-nums; }

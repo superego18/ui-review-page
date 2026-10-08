@@ -47,14 +47,14 @@ if (!fs.existsSync(path.join(root, 'review.html'))) {
 }
 
 function feedbackFile(round) {
-  return /^\d{1,3}$/.test(round) ? path.join(root, `r${round}.json`) : null;
+  return /^[a-z0-9-]{1,40}$/i.test(round) ? path.join(root, `r${round}.json`) : null;
 }
 
 function readFeedback(file, round) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
-    return { round: Number(round), items: {}, overall: '', done: false };
+    return { round: /^\d+$/.test(round) ? Number(round) : round, items: {}, overall: '', done: false };
   }
 }
 
@@ -442,12 +442,13 @@ function findSessionByKey(key) {
 }
 
 // 완료 표시를 받을 세션이 있는지. Claude 는 --done 감시, Codex 는 완료 때 codex queue 로 "피드백 확인해"를 넣는다.
-function readReviewWatch(sessionKey) {
+function readReviewWatch(sessionKey, round) {
   let files = [];
   try {
     files = fs.readdirSync(root).filter((f) => /^watch-.+\.json$/.test(f));
   } catch {}
-  const live = files.map(readWatchFile).filter((w) => w.active && w.handlesDone);
+  // 감시가 라운드를 정했으면 그 라운드 페이지에만 보인다. 다른 라운드·비교 페이지에 "자동 이어가기 켜짐"으로 잘못 뜨지 않게.
+  const live = files.map(readWatchFile).filter((w) => w.active && w.handlesDone && (w.round == null || !round || String(w.round) === round));
   if (live[0]) return live[0];
   const s = findSessionByKey(sessionKey);
   if (s?.tool === 'codex') return { active: true, via: 'queue', agent: s.agent || s.name, session: s.sessionId, handlesDone: true };
@@ -473,7 +474,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === '/api/watch') {
-    return send(res, 200, readReviewWatch(url.searchParams.get('session') || ''));
+    return send(res, 200, readReviewWatch(url.searchParams.get('session') || '', url.searchParams.get('round') || ''));
   }
 
   if (url.pathname === '/api/status' && req.method === 'POST') {
@@ -634,7 +635,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/feedback') {
     const round = url.searchParams.get('round') ?? '';
     const file = feedbackFile(round);
-    if (!file) return send(res, 400, { error: 'round 는 숫자여야 합니다.' });
+    if (!file) return send(res, 400, { error: 'round 는 숫자나 영문 id 여야 합니다.' });
 
     if (req.method === 'GET') return send(res, 200, readFeedback(file, round));
 

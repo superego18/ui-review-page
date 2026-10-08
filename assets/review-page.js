@@ -64,12 +64,41 @@ function sourceLine(source) {
   return p;
 }
 
-function shot(image, kind, itemId) {
+// 비교할 UI 묶음. 전후든, 추천안끼리든, 다른 사람 결과물과 지금 시스템이든 같은 틀로 그린다.
+// 항목에 options 가 없으면 before/after 를 '전'/'후' 두 안으로 본다.
+const optionsOf = (it) => it.options || [{ label: '전', tone: 'before', shots: it.before || [] }, { label: '후', shots: it.after || [] }];
+// 고를 평가. 전후 비교는 좋음/수정 필요/되돌리기, options 로 안끼리 비교하면 안 이름 중 하나(+ 다른 방향).
+const choicesOf = (it) => (it.choices || (it.options ? [...it.options.map((o) => o.label), '다른 방향'] : Object.keys(LABELS)));
+
+function caption(label) {
+  const cap = document.createElement('figcaption');
+  const b = document.createElement('b');
+  b.textContent = label;
+  cap.append(b);
+  return cap;
+}
+
+// 움직임·누르는 감각처럼 정지 이미지로 볼 수 없는 비교는 실제로 동작하는 HTML(demo)을 띄운다.
+function demoFrame(opt) {
+  const f = document.createElement('figure');
+  f.className = 'demo ' + (opt.tone || 'after');
+  const cap = caption(opt.label);
+  const a = document.createElement('a');
+  a.href = opt.demo; a.target = '_blank'; a.textContent = '새 창으로 열기';
+  cap.append(a);
+  const frame = document.createElement('iframe');
+  frame.src = opt.demo; frame.loading = 'lazy'; frame.title = opt.label;
+  f.append(cap, frame);
+  const src = sourceLine(opt.source);
+  if (src) f.append(src);
+  return f;
+}
+
+function shot(image, label, tone, itemId) {
   const { file, marks, source } = imgOf(image);
   const f = document.createElement('figure');
-  f.className = kind;
-  const cap = document.createElement('figcaption');
-  cap.innerHTML = `<b>${kind === 'before' ? '전' : '후'}</b>`;
+  f.className = tone;
+  const cap = caption(label);
   cap.append(file.replace('.png', ''));
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -278,12 +307,19 @@ function render() {
       }
       ul.append(li);
     });
-    it.before.forEach((f) => shots.append(shot(f, 'before', it.id)));
-    it.after.forEach((f) => shots.append(shot(f, 'after', it.id)));
+    for (const o of optionsOf(it)) {
+      const figs = [...(o.demo ? [demoFrame(o)] : []), ...(o.shots || []).map((f) => shot(f, o.label, o.tone || 'after', it.id))];
+      if (o.note && figs[0]) {
+        const p = document.createElement('p');
+        p.className = 'optnote'; p.textContent = o.note;
+        figs[0].insertBefore(p, figs[0].children[1]);
+      }
+      shots.append(...figs);
+    }
     const v = sec.querySelector('.verdict');
-    for (const key of Object.keys(LABELS)) {
+    for (const key of choicesOf(it)) {
       const b = document.createElement('button');
-      b.type = 'button'; b.className = 'opt'; b.dataset.v = key; b.textContent = LABELS[key];
+      b.type = 'button'; b.className = 'opt' + (LABELS[key] ? '' : ' pick'); b.dataset.v = key; b.textContent = LABELS[key] || key;
       b.setAttribute('aria-pressed', String(state[it.id]?.verdict === key));
       b.onclick = () => save(it.id, { verdict: key });
       v.append(b);
@@ -393,7 +429,7 @@ $('#done').onclick = async () => {
 };
 
 $('#title').textContent = document.title;
-$('#eyebrow').textContent = `${REVIEW.project} · ${REVIEW.round}차 리뷰`;
+$('#eyebrow').textContent = `${REVIEW.project} · ${REVIEW.name || `${REVIEW.round}차 리뷰`}`;
 render();
 
 (async () => {
