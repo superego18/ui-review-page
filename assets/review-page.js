@@ -96,7 +96,25 @@ function demoFrame(opt) {
   return f;
 }
 
-function shot(image, label, tone, itemId) {
+// 이미지에 있는 번호마다 changes 의 같은 번호 문구를 이미지 바로 아래에 다시 적는다.
+// 번호 상자만 보고도 무슨 변경인지 알 수 있게. 이미지 안에 글을 얹으면 화면을 덮으므로 아래에 둔다.
+// texts: { '1': '제목을 한 줄로', … } (changes 에서 "1 …"로 시작하는 줄)
+function markLegend(marks, texts) {
+  const ns = [...new Set((marks || []).map((m) => String(m.n)))].filter((n) => texts?.[n]).sort((a, b) => a - b);
+  if (!ns.length) return null;
+  const ul = document.createElement('ul');
+  ul.className = 'marklegend';
+  for (const n of ns) {
+    const li = document.createElement('li');
+    const num = document.createElement('span');
+    num.className = 'mnum'; num.textContent = n;
+    li.append(num, texts[n]);
+    ul.append(li);
+  }
+  return ul;
+}
+
+function shot(image, label, tone, itemId, texts) {
   const { file, marks, source } = imgOf(image);
   const f = document.createElement('figure');
   f.className = tone;
@@ -114,8 +132,10 @@ function shot(image, label, tone, itemId) {
   drawMarks(wrap, marks);
   drawPins(wrap, itemId, file);
   btn.append(wrap);
-  btn.onclick = () => openZoom(itemId, file, marks);
+  btn.onclick = () => openZoom(itemId, file, marks, texts);
   f.append(cap, btn);
+  const legend = markLegend(marks, texts);
+  if (legend) f.append(legend);
   const src = sourceLine(source);
   if (src) f.append(src);
   return f;
@@ -252,11 +272,15 @@ function endTouch(e) {
 }
 ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => stageEl.addEventListener(t, endTouch));
 
-function openZoom(itemId, file, marks) {
+function openZoom(itemId, file, marks, texts) {
   zoomCtx = { itemId, file };
   $('#zoomName').textContent = file.replace('.png', '');
   $('#zoomImg').src = file;
   drawMarks($('#zoomWrap'), marks);
+  // 크게 볼 때도 번호 문구를 확대 화면 아래에 둔다(예전에 만든 review.html 에도 붙도록 자리를 직접 만든다).
+  $('#zoomLegend')?.remove();
+  const legend = markLegend(marks, texts);
+  if (legend) { legend.id = 'zoomLegend'; $('#zoomStage').after(legend); }
   applyZoom('fit');
   $('#zoomStage').scrollTo(0, 0);
   renderZoomPins();
@@ -291,6 +315,7 @@ function render() {
     const ul = sec.querySelector('.changes');
     const shots = sec.querySelector('.shots');
     // "1 바뀐 점"처럼 번호로 시작하는 줄은 같은 번호 상자와 이어진다. 올리거나 누르면 그 상자를 강조한다.
+    const texts = Object.fromEntries((it.changes || []).map((c) => /^(\d+)[.)]?\s+(.*)$/.exec(c)).filter(Boolean).map((m) => [m[1], m[2]]));
     const highlight = (n, on) => shots.querySelectorAll(`.mark[data-n="${n}"]`).forEach((m) => m.classList.toggle('hl', on));
     it.changes.forEach((c) => {
       const li = document.createElement('li');
@@ -317,7 +342,7 @@ function render() {
       shots.before(w);
     }
     for (const o of optionsOf(it)) {
-      const figs = [...(o.demo ? [demoFrame(o)] : []), ...(o.shots || []).map((f) => shot(f, o.label, o.tone || 'after', it.id))];
+      const figs = [...(o.demo ? [demoFrame(o)] : []), ...(o.shots || []).map((f) => shot(f, o.label, o.tone || 'after', it.id, texts))];
       if (o.note && figs[0]) {
         const p = document.createElement('p');
         p.className = 'optnote'; p.textContent = o.note;

@@ -79,12 +79,15 @@ dialog .pinwrap img { border-radius: 6px; cursor: crosshair; }
 .mark.edge b { transform: translate(0, 0); }
 .mark.out b { left: auto; right: 100%; top: 50%; transform: translate(-3px, -50%); }
 .mark.out.right b { right: auto; left: 100%; transform: translate(3px, -50%); }
+.marklegend { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12px; line-height: 1.45; color: var(--ink-2); }
+.marklegend li { display: flex; align-items: baseline; }
+#zoomLegend { margin-top: 8px; font-size: 13px; }
 .nomobile { margin: 0; font-size: 12px; font-weight: 600; color: var(--warn); }
 figure .mark { border-width: 1.5px; }
 figure .mark b { width: 16px; height: 16px; font-size: 10px; line-height: 16px; box-shadow: 0 0 0 1.5px #fff; }
 .mark.hl { background: color-mix(in srgb, var(--mark) 18%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mark) 40%, transparent); }
 .changes li[data-n] { cursor: default; }
-.changes .mnum { display: inline-block; min-width: 18px; padding: 0 5px; margin-right: 6px; border-radius: 4px; background: var(--mark); color: #fff; font: 600 11px/18px var(--sans); text-align: center; vertical-align: 1px; }
+.changes .mnum, .marklegend .mnum { display: inline-block; min-width: 18px; padding: 0 5px; margin-right: 6px; border-radius: 4px; background: var(--mark); color: #fff; font: 600 11px/18px var(--sans); text-align: center; vertical-align: 1px; }
 .src { font-size: 11px; color: var(--ink-3); line-height: 1.4; font-family: var(--mono); overflow-wrap: anywhere; }
 .src.indirect { color: var(--warn); font-family: var(--sans); }
 .src .mocked { color: var(--warn); font-family: var(--sans); }
