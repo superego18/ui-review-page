@@ -317,9 +317,12 @@ function render() {
     // "1 바뀐 점"처럼 번호로 시작하는 줄은 같은 번호 상자와 이어진다. 올리거나 누르면 그 상자를 강조한다.
     const texts = Object.fromEntries((it.changes || []).map((c) => /^(\d+)[.)]?\s+(.*)$/.exec(c)).filter(Boolean).map((m) => [m[1], m[2]]));
     const highlight = (n, on) => shots.querySelectorAll(`.mark[data-n="${n}"]`).forEach((m) => m.classList.toggle('hl', on));
+    // 번호 문구는 그 번호가 있는 이미지 바로 아래에 나오므로, 위쪽 목록에는 이미지에 없는 번호와 번호 없는 줄만 둔다.
+    const shown = new Set(optionsOf(it).flatMap((o) => (o.shots || []).flatMap((x) => (imgOf(x).marks || []).map((mk) => String(mk.n)))));
     it.changes.forEach((c) => {
       const li = document.createElement('li');
       const m = /^(\d+)[.)]?\s+/.exec(c);
+      if (m && shown.has(m[1])) return;
       if (m) {
         li.dataset.n = m[1];
         const num = document.createElement('span');
