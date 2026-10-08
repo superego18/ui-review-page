@@ -294,7 +294,8 @@ function draftText(d) {
 }
 
 // 고른 항목을 받는 세션별로 묶어 보낸다. combine 이면 세션마다 번호 매긴 메시지 하나, 아니면 하나씩.
-function sendDrafts(ids, combine) {
+// device: 보내기를 누른 화면(대화 라벨에 붙음). 항목마다 담은 화면은 본문에 "(모바일에서 남김)"으로 남는다.
+function sendDrafts(ids, combine, device) {
   const store = readDrafts();
   const picked = store.drafts.filter((d) => ids.includes(d.id));
   // 받는 세션과 분류가 같은 것끼리 한 메시지로 묶는다. 받는 세션도 분류 단위로 처리할 수 있게 첫 줄에 분류를 적는다.
@@ -309,9 +310,9 @@ function sendDrafts(ids, combine) {
     const label = list[0].label || '미분류'; // 분류 없이 담은 것도 [미분류]로 붙여 받는 세션이 묶음을 알게 한다
     if (combine && list.length > 1) {
       const text = `${label ? `[${label}] ` : ''}보관함에서 모아 보낸 ${list.length}개입니다.\n\n` + list.map((d, i) => `${i + 1}. ${draftText(d).replace(/\n/g, '\n   ')}`).join('\n\n');
-      sent.push(addChat({ from: 'user', to, text, context: list.every((d) => d.context === 'review') ? 'review' : 'app' }));
+      sent.push(addChat({ from: 'user', to, text, device, context: list.every((d) => d.context === 'review') ? 'review' : 'app' }));
     } else {
-      for (const d of list) sent.push(addChat({ from: 'user', to, text: (label ? `[${label}] ` : '') + draftText(d), context: d.context, round: d.round, where: d.where, device: d.device }));
+      for (const d of list) sent.push(addChat({ from: 'user', to, text: (label ? `[${label}] ` : '') + draftText(d), context: d.context, round: d.round, where: d.where, device: device || d.device }));
     }
   }
   store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
@@ -352,7 +353,7 @@ function handleDrafts(req) {
   }
   if (req.action === 'send') {
     if (!ids.length) return { status: 400, body: { error: '보낼 항목(ids)이 필요합니다.' } };
-    return { status: 200, body: { sent: sendDrafts(ids, req.combine !== false) } };
+    return { status: 200, body: { sent: sendDrafts(ids, req.combine !== false, req.device === 'mobile' || req.device === 'desktop' ? req.device : null) } };
   }
   return { status: 400, body: { error: 'action은 add·update·delete·send 중 하나입니다.' } };
 }
