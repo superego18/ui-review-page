@@ -454,7 +454,7 @@ $('#done').onclick = async () => {
   finished = true;
   autoAtDone = autoOn;
   try {
-    await post({ done: true, session: REVIEW.session });
+    await post({ done: true, session: REVIEW.session, name: REVIEW.name });
     renderMode();
     $('#doneNote').textContent = autoAtDone
       ? `완료로 표시했습니다. ${watch.agent}가 이어서 작업합니다. 터미널에 보낼 메시지는 없습니다.`
