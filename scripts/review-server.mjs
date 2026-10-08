@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // UI 피드백 리뷰 서버. 의존성 없음 (Node 18+).
-// 사용: node review-server.mjs [--dir .ui-feedback] [--port 4799]
+// 사용: node review-server.mjs [--dir .ui-feedback] [--port 4799] [--lan]
+//   --lan: 폰 등 다른 기기에서도 열리게 한다(접속 키 필요, lan-auth.mjs).
 //   <dir>/review.html 과 캡처 이미지를 정적으로 제공하고,
 //   페이지가 보낸 평가를 <dir>/r<round>.json 에, 대화를 <dir>/chat.json 에 저장한다.
 //   세션별 대화: 등록된 세션(<dir>/sessions/)을 /api/sessions 로 알려 주고, 메시지는 to(받는 세션)·session(보낸 세션)으로 나눈다.
@@ -12,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { lanAuth } from './lan-auth.mjs';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -19,6 +21,7 @@ function arg(name, fallback) {
 }
 
 const root = path.resolve(arg('dir', '.ui-feedback'));
+const auth = lanAuth({ dir: root, lan: process.argv.includes('--lan') });
 const assetsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets');
 // 모든 리뷰 페이지가 함께 쓰는 공용 파일. 요청마다 새로 읽으므로 고치면 이미 만든 페이지도 새로고침만으로 바뀐다.
 const SHARED = {
@@ -449,6 +452,7 @@ function readReviewWatch(sessionKey) {
 }
 
 const server = http.createServer((req, res) => {
+  if (!auth.check(req, res)) return;
   const url = new URL(req.url, 'http://localhost');
 
   // 대화/피드백 위젯(assets/app-widget.js)은 앱 화면(app-proxy)과 리뷰 페이지가 같은 파일을 쓴다.
@@ -680,7 +684,8 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-server.listen(port, '127.0.0.1', () => {
+server.listen(port, auth.host, () => {
   console.log(`리뷰 페이지: http://localhost:${port}/`);
+  for (const u of auth.urls(port)) console.log(`다른 기기(폰)에서: ${u}`);
   console.log(`평가 저장 위치: ${root}${path.sep}r<round>.json`);
 });
