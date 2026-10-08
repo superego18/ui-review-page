@@ -148,6 +148,28 @@ function addChat(msg) {
   return entry;
 }
 
+// ── 읽음 상태 ──
+// 세션마다 사용자가 마지막으로 읽은 답의 시각. 앱 화면(4798)과 리뷰 페이지(4799)는 주소가 달라 브라우저 저장소를 함께 못 쓰므로 서버에 둔다.
+const seenFile = path.join(root, 'seen.json');
+function readSeen() {
+  try {
+    return JSON.parse(fs.readFileSync(seenFile, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+// 더 나중 시각만 받아들인다(늦게 도착한 옛 값이 읽음을 되돌리지 않게).
+function markSeen(updates) {
+  const seen = readSeen();
+  let changed = false;
+  for (const [id, at] of Object.entries(updates || {})) {
+    if (!sid(id) || typeof at !== 'string' || at.length > 40) continue;
+    if (!seen[id] || at > seen[id]) { seen[id] = at; changed = true; }
+  }
+  if (changed) fs.writeFileSync(seenFile, JSON.stringify(seen, null, 2) + '\n');
+  return seen;
+}
+
 // ── 보관함 ──
 const draftsFile = path.join(root, 'drafts.json');
 const projectDir = path.dirname(root);
@@ -383,6 +405,26 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/api/transcript') {
     return send(res, 200, readTranscript(url.searchParams.get('session') || ''));
+  }
+
+  if (url.pathname === '/api/seen') {
+    if (req.method === 'GET') return send(res, 200, readSeen());
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > MAX_BODY) req.destroy();
+      });
+      req.on('end', () => {
+        try {
+          send(res, 200, markSeen(JSON.parse(body)));
+        } catch {
+          send(res, 400, { error: 'JSON 형식이 아닙니다.' });
+        }
+      });
+      return;
+    }
+    return send(res, 405, { error: 'GET 또는 POST만 됩니다.' });
   }
 
   if (url.pathname === '/api/drafts') {
