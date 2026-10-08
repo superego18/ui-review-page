@@ -120,7 +120,10 @@ function queueToCodex(session, entry) {
     ? `\n위치: ${entry.where.url || ''}${entry.where.selector ? ' · ' + entry.where.selector : ''}${entry.where.text ? ' · "' + entry.where.text + '"' : ''}`
     : '';
   const src = entry.context === 'app' ? '앱 화면' : '리뷰';
-  const message = `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] ${entry.text}${where}`;
+  queueText(session, `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] ${entry.text}${where}`);
+}
+
+function queueText(session, message) {
   const args = ['queue', '--thread', session.sessionId, '--message', message];
   const child = process.platform === 'win32'
     ? spawn('powershell', ['-NoProfile', '-Command', '& codex queue --thread $env:UIFB_THREAD --message $env:UIFB_MESSAGE'], { env: { ...process.env, UIFB_THREAD: session.sessionId, UIFB_MESSAGE: message }, stdio: 'ignore' })
@@ -184,13 +187,23 @@ function readWatchFile(name) {
 }
 
 // 리뷰 완료 표시를 받아 반영할 감시(handlesDone)가 살아 있는지. 페이지 위쪽 "자동 이어가기" 표시에 쓴다.
-function readReviewWatch() {
+// 리뷰를 반영하는 세션(REVIEW.session)을 이름이나 id 로 찾는다.
+function findSessionByKey(key) {
+  if (!key) return null;
+  return findSession(key) || listSessions().map((s) => findSession(s.id)).find((s) => s?.name === key) || null;
+}
+
+// 완료 표시를 받을 세션이 있는지. Claude 는 --done 감시, Codex 는 완료 때 codex queue 로 "피드백 확인해"를 넣는다.
+function readReviewWatch(sessionKey) {
   let files = [];
   try {
     files = fs.readdirSync(root).filter((f) => /^watch-.+\.json$/.test(f));
   } catch {}
   const live = files.map(readWatchFile).filter((w) => w.active && w.handlesDone);
-  return live[0] || { active: false };
+  if (live[0]) return live[0];
+  const s = findSessionByKey(sessionKey);
+  if (s?.tool === 'codex') return { active: true, via: 'queue', agent: s.agent || s.name, session: s.sessionId, handlesDone: true };
+  return { active: false };
 }
 
 const server = http.createServer((req, res) => {
@@ -202,7 +215,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === '/api/watch') {
-    return send(res, 200, readReviewWatch());
+    return send(res, 200, readReviewWatch(url.searchParams.get('session') || ''));
   }
 
   if (url.pathname === '/api/status' && req.method === 'POST') {
@@ -301,9 +314,14 @@ const server = http.createServer((req, res) => {
           data.items[patch.id] = { ...(data.items[patch.id] || {}), ...patch.fields, updatedAt: new Date().toISOString() };
         }
         if (typeof patch.overall === 'string') data.overall = patch.overall;
+        const newlyDone = patch.done === true && data.done !== true;
         if (patch.done === true) data.done = true;
         data.updatedAt = new Date().toISOString();
         fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+        const reviewer = newlyDone ? findSessionByKey(typeof patch.session === 'string' ? patch.session : '') : null;
+        if (reviewer?.tool === 'codex') {
+          queueText(reviewer, `${QUEUE_PREFIX}리뷰 · ${round}차] 피드백 확인해. 사용자가 ${round}차 리뷰 완료를 표시했습니다. .ui-feedback/r${round}.json 을 읽고 ui-feedback-loop 5단계대로 반영하세요.`);
+        }
         send(res, 200, { ok: true });
       });
       return;

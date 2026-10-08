@@ -185,6 +185,7 @@
 const REVIEW = {
   project: '__PROJECT__',
   round: 1,
+  session: '__SESSION__', // 이 리뷰를 반영하는 세션 이름(register-session --name). Codex 세션이면 완료 표시 때 바로 깨워 이어서 작업하게 한다
   scale: 2, // 캡처 배율. capture-2x.js로 찍었으면 2, page.screenshot으로 찍었으면 1
   items: [
     // { id: 'write', title: '작성 화면 재배치', changes: ['바뀐 점 한 줄', '…'], before: ['before-write.png'], after: ['after-write.png'] },
@@ -497,7 +498,7 @@ function renderMode() {
 let watch = {};
 async function pollWatch() {
   try {
-    watch = await (await fetch('/api/watch?round=' + REVIEW.round)).json();
+    watch = await (await fetch('/api/watch?round=' + REVIEW.round + '&session=' + encodeURIComponent(REVIEW.session || ''))).json();
     autoOn = watch.active === true;
   } catch { autoOn = false; }
   renderMode();
@@ -797,7 +798,7 @@ $('#done').onclick = async () => {
   finished = true;
   autoAtDone = autoOn;
   try {
-    await post({ done: true });
+    await post({ done: true, session: REVIEW.session });
     renderMode();
     $('#doneNote').textContent = autoAtDone
       ? `완료로 표시했습니다. ${watch.agent}가 이어서 작업합니다. 터미널에 보낼 메시지는 없습니다.`
