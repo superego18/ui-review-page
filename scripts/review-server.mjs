@@ -4,10 +4,12 @@
 //   <dir>/review.html 과 캡처 이미지를 정적으로 제공하고,
 //   페이지가 보낸 평가를 <dir>/r<round>.json 에, 대화를 <dir>/chat.json 에 저장한다.
 //   세션별 대화: 등록된 세션(<dir>/sessions/)을 /api/sessions 로 알려 주고, 메시지는 to(받는 세션)·session(보낸 세션)으로 나눈다.
+//   Codex 세션에게 온 메시지는 `codex queue` 로 그 세션에 바로 넣어 깨운다(감시 명령이 필요 없다). 답은 Codex 대화 기록에서 읽어 보여 준다.
 
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -85,7 +87,7 @@ function listSessions() {
     })
     .filter(Boolean)
     .sort((a, b) => String(a.registeredAt).localeCompare(String(b.registeredAt)))
-    .map((s) => ({ id: s.sessionId, name: s.name, tool: s.tool, agent: s.agent, watch: readWatchFile(`watch-${s.sessionId}.json`), status: readStatus(s.sessionId) }));
+    .map((s) => ({ id: s.sessionId, name: s.name, tool: s.tool, agent: s.agent, watch: s.tool === 'codex' ? { active: true, via: 'queue' } : readWatchFile(`watch-${s.sessionId}.json`), status: readStatus(s.sessionId) }));
 }
 
 // hook-relay.mjs 가 보낸 세션 상태(작업 중·승인 대기·쉬는 중). 오래된 "작업 중"은 믿지 않는다.
@@ -109,6 +111,24 @@ function findSession(id) {
 
 // Codex 세션은 훅이 없어서 대화 기록 파일에서 사용자 입력과 에이전트 답만 뽑아 보여 준다(내부 형식).
 // Claude 세션은 hook-relay.mjs 훅이 chat.json 으로 보내므로 여기서는 읽지 않는다.
+const QUEUE_PREFIX = '[대화/피드백 · ';
+
+// 페이지 메시지를 실행 중인 Codex 세션에 넣는다. 쉬고 있으면 바로 새 턴이 시작되고, 작업 중이면 그 턴이 끝난 뒤 처리된다.
+// 메시지는 인자나 환경 변수로만 넘겨 셸이 해석하지 않게 한다(Windows는 codex.cmd 라서 PowerShell 로 부른다).
+function queueToCodex(session, entry) {
+  const where = entry.where?.url || entry.where?.selector
+    ? `\n위치: ${entry.where.url || ''}${entry.where.selector ? ' · ' + entry.where.selector : ''}${entry.where.text ? ' · "' + entry.where.text + '"' : ''}`
+    : '';
+  const src = entry.context === 'app' ? '앱 화면' : '리뷰';
+  const message = `${QUEUE_PREFIX}${src}${entry.round ? ` · ${entry.round}차` : ''}] ${entry.text}${where}`;
+  const args = ['queue', '--thread', session.sessionId, '--message', message];
+  const child = process.platform === 'win32'
+    ? spawn('powershell', ['-NoProfile', '-Command', '& codex queue --thread $env:UIFB_THREAD --message $env:UIFB_MESSAGE'], { env: { ...process.env, UIFB_THREAD: session.sessionId, UIFB_MESSAGE: message }, stdio: 'ignore' })
+    : spawn('codex', args, { stdio: 'ignore' });
+  child.on('error', (e) => console.error(`codex queue 실패(${session.name}): ${e.message}`));
+  child.on('exit', (code) => { if (code) console.error(`codex queue 실패(${session.name}): 종료 코드 ${code}`); });
+}
+
 function readTranscript(id) {
   const session = findSession(id);
   if (!session) return { items: [] };
@@ -140,7 +160,7 @@ function readTranscript(id) {
     const p = o.payload;
     if (o.type !== 'response_item' || p?.type !== 'message' || !['user', 'assistant'].includes(p.role)) continue;
     const text = stripTags((p.content || []).filter((b) => b.type === 'input_text' || b.type === 'output_text').map((b) => b.text).join('\n'));
-    if (!text || (p.role === 'user' && (text.startsWith('<') || text.includes('AGENTS.md instructions')))) continue;
+    if (!text || (p.role === 'user' && (text.startsWith('<') || text.startsWith(QUEUE_PREFIX) || text.includes('AGENTS.md instructions')))) continue;
     items.push({ id: `x${p.id || o.ordinal}`, from: p.role === 'user' ? 'user' : 'agent', session: id, context: 'terminal', agent: session.agent, text: text.slice(0, 8000), at: o.timestamp });
   }
   const data = { items: items.slice(-300) };
@@ -247,6 +267,8 @@ const server = http.createServer((req, res) => {
         }
         chat.messages.push(entry);
         fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
+        const target = entry.from === 'user' && entry.to ? findSession(entry.to) : null;
+        if (target?.tool === 'codex') queueToCodex(target, entry);
         send(res, 200, entry);
       });
       return;
