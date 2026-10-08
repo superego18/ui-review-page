@@ -96,6 +96,7 @@
   .pinsummary .num { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); color: #fff; font: 600 9px/16px var(--sans); text-align: center; margin-right: 6px; vertical-align: 1px; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
   .chatbtn { position: fixed; right: 20px; bottom: 20px; z-index: 20; font: inherit; font-weight: 600; font-size: 14px; padding: 11px 16px; border-radius: 999px; border: 0; background: var(--ink); color: var(--paper); cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.2); display: flex; gap: 8px; align-items: center; }
+  .chat[hidden], .peek[hidden] { display: none; }
   .chatbtn .badge { min-width: 18px; height: 18px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 11px; line-height: 18px; text-align: center; padding: 0 5px; }
   .chat { position: fixed; right: 20px; bottom: 76px; z-index: 20; width: min(380px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--sheet); border-radius: 12px; box-shadow: 0 0 0 1px var(--rule), 0 12px 32px rgba(0,0,0,.18); display: flex; flex-direction: column; overflow: hidden; }
   .grip { position: absolute; left: 0; top: 0; width: 18px; height: 18px; cursor: nwse-resize; z-index: 2; touch-action: none; }
@@ -181,11 +182,11 @@
   </section>
 </div>
 <div class="peek" id="peek" hidden role="status"></div>
-<button class="chatbtn" id="chatBtn" type="button" aria-expanded="false" aria-controls="chat">대화<span class="badge" id="chatBadge" hidden></span></button>
-<section class="chat" id="chat" hidden aria-label="세션과 대화">
+<button class="chatbtn" id="chatBtn" type="button" aria-expanded="false" aria-controls="chat">대화/피드백<span class="badge" id="chatBadge" hidden></span></button>
+<section class="chat" id="chat" hidden aria-label="대화/피드백">
   <div class="grip" id="grip" title="끌어서 크기 조절 · 두 번 누르면 원래 크기" aria-hidden="true"></div>
   <header>
-    <b>세션과 대화</b>
+    <b>대화/피드백 · 리뷰</b>
     <div class="tabs" id="tabs" role="tablist" aria-label="세션"></div>
     <p id="chatMode" data-auto="off"></p>
   </header>
