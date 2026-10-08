@@ -32,7 +32,9 @@ function drawMarks(wrap, marks) {
   wrap.querySelectorAll('.mark').forEach((m) => m.remove());
   for (const m of marks || []) {
     const box = document.createElement('span');
-    box.className = 'mark' + (m.x < 2 || m.y < 2 ? ' edge' : ''); // 이미지 가장자리면 번호를 상자 안쪽에 둔다
+    // 작은 상자(칩·배지)는 번호가 상자와 그 안 글자를 덮으므로 번호를 상자 바깥 왼쪽(왼쪽 끝이면 오른쪽)에 둔다.
+    const small = m.w < 10 || m.h < 6;
+    box.className = 'mark' + (small ? ' out' + (m.x < 4 ? ' right' : '') : (m.x < 2 || m.y < 2 ? ' edge' : '')); // 큰 상자가 이미지 가장자리면 번호를 상자 안쪽에 둔다
     box.dataset.n = String(m.n);
     Object.assign(box.style, { left: m.x + '%', top: m.y + '%', width: m.w + '%', height: m.h + '%' });
     const b = document.createElement('b');
@@ -307,6 +309,13 @@ function render() {
       }
       ul.append(li);
     });
+    // 화면 비교는 데스크톱과 모바일(390px)을 함께 본다. 직접 찍은 캡처 중 모바일 폭이 없으면 눈에 띄게 알린다.
+    const vps = optionsOf(it).flatMap((o) => (o.shots || []).map((x) => imgOf(x).source?.viewport)).filter(Boolean);
+    if (vps.length && !vps.some((v) => parseInt(v, 10) < 768)) {
+      const w = document.createElement('p');
+      w.className = 'nomobile'; w.textContent = '모바일(390px) 캡처가 없습니다';
+      shots.before(w);
+    }
     for (const o of optionsOf(it)) {
       const figs = [...(o.demo ? [demoFrame(o)] : []), ...(o.shots || []).map((f) => shot(f, o.label, o.tone || 'after', it.id))];
       if (o.note && figs[0]) {

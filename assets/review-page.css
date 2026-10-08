@@ -77,6 +77,9 @@ dialog .pinwrap img { border-radius: 6px; cursor: crosshair; }
 .mark { position: absolute; border: 2px solid var(--mark); border-radius: 4px; pointer-events: none; box-shadow: 0 0 0 1px rgba(255,255,255,.6); transition: background-color .15s, box-shadow .15s; }
 .mark b { position: absolute; left: 0; top: 0; transform: translate(-45%, -45%); width: 20px; height: 20px; border-radius: 50%; background: var(--mark); color: #fff; font: 600 11px/20px var(--sans); text-align: center; box-shadow: 0 0 0 2px #fff; }
 .mark.edge b { transform: translate(0, 0); }
+.mark.out b { left: auto; right: 100%; top: 50%; transform: translate(-3px, -50%); }
+.mark.out.right b { right: auto; left: 100%; transform: translate(3px, -50%); }
+.nomobile { margin: 0; font-size: 12px; font-weight: 600; color: var(--warn); }
 figure .mark { border-width: 1.5px; }
 figure .mark b { width: 16px; height: 16px; font-size: 10px; line-height: 16px; box-shadow: 0 0 0 1.5px #fff; }
 .mark.hl { background: color-mix(in srgb, var(--mark) 18%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mark) 40%, transparent); }
