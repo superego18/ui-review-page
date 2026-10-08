@@ -890,12 +890,21 @@ $('#compose').onsubmit = async (e) => {
 };
 
 // 입력칸: 글이 길어지면 자동으로 늘어나고(화면 절반까지), 오른쪽 아래 모서리를 끌어 직접 키우거나 줄일 수도 있다.
+// 입력칸은 대화 창 높이의 40%까지만 커진다. 커진 만큼 대화 목록이 줄어들 뿐 겹치지 않고, 아래 끝을 보던 중이면 계속 아래 끝을 보여 준다.
+const inputMax = () => Math.round($('#chat').getBoundingClientRect().height * 0.4) || 200;
 function autoGrow(el) {
-  const max = Math.round(innerHeight * 0.5);
+  const max = inputMax();
+  el.style.maxHeight = max + 'px';
   if (!el.value) { el.style.height = ''; return; }
   if (el.scrollHeight > el.clientHeight) el.style.height = Math.min(el.scrollHeight + 2, max) + 'px';
 }
 $('#chatInput').addEventListener('input', () => autoGrow($('#chatInput')));
+$('#chatInput').addEventListener('pointerdown', () => { $('#chatInput').style.maxHeight = inputMax() + 'px'; });
+{
+  let gap = 0;
+  $('#msgs').addEventListener('scroll', () => { const b = $('#msgs'); gap = b.scrollHeight - b.scrollTop - b.clientHeight; });
+  new ResizeObserver(() => { const b = $('#msgs'); if (gap < 40) b.scrollTop = b.scrollHeight; }).observe($('#msgs'));
+}
 $('#chatInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
