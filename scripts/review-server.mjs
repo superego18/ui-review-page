@@ -174,7 +174,7 @@ function markSeen(updates) {
 }
 
 // ── 화면 설정 ──
-// 대화 창 크기·입력칸 높이. 두 화면이 함께 쓰고, 데스크톱과 모바일은 따로 둔다({ desktop: {...}, mobile: {...} }).
+// 대화 창 크기·입력칸 높이는 데스크톱과 모바일을 따로 두고({ desktop: {...}, mobile: {...} }), 고른 세션 탭(tab)은 함께 쓴다.
 const prefsFile = path.join(root, 'prefs.json');
 function readPrefs() {
   try {
@@ -190,9 +190,32 @@ function savePrefs(req) {
   const num = (v) => (Number.isFinite(v) && v > 0 && v < 5000 ? Math.round(v) : null);
   if ('panel' in req) cur.panel = req.panel && num(req.panel.w) && num(req.panel.h) ? { w: num(req.panel.w), h: num(req.panel.h) } : null;
   if ('inputH' in req) cur.inputH = num(req.inputH);
-  prefs[device] = cur;
+  if ('tab' in req && sid(req.tab)) prefs.tab = req.tab;
+  // 세션마다 보고 있던 메시지(맨 위에 보이던 메시지 id, 맨 아래면 'bottom'). 화면 폭과 상관없이 같은 메시지로 돌아간다.
+  if (req.pos && sid(req.pos.session) && typeof req.pos.id === 'string' && req.pos.id.length < 80) prefs.pos = { ...(prefs.pos || {}), [req.pos.session]: req.pos.id };
+  if ('panel' in req || 'inputH' in req) prefs[device] = cur;
   fs.writeFileSync(prefsFile, JSON.stringify(prefs, null, 2) + '\n');
   return prefs;
+}
+
+// ── 쓰던 글 ──
+// 세션 탭마다 입력칸에 쓰다가 아직 보내지 않은 글. 새로고침해도 남고, 앱 화면·리뷰 페이지에서 이어 쓸 수 있다.
+const composeFile = path.join(root, 'compose.json');
+function readCompose() {
+  try {
+    return JSON.parse(fs.readFileSync(composeFile, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+function saveCompose(req) {
+  const all = readCompose();
+  if (!sid(req.session)) return all;
+  const text = typeof req.text === 'string' ? req.text.slice(0, 12000) : '';
+  if (text) all[req.session] = { text, at: new Date().toISOString() };
+  else delete all[req.session];
+  fs.writeFileSync(composeFile, JSON.stringify(all, null, 2) + '\n');
+  return all;
 }
 
 // ── 보관함 ──
@@ -430,6 +453,26 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/api/transcript') {
     return send(res, 200, readTranscript(url.searchParams.get('session') || ''));
+  }
+
+  if (url.pathname === '/api/compose') {
+    if (req.method === 'GET') return send(res, 200, readCompose());
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > MAX_BODY) req.destroy();
+      });
+      req.on('end', () => {
+        try {
+          send(res, 200, saveCompose(JSON.parse(body)));
+        } catch {
+          send(res, 400, { error: 'JSON 형식이 아닙니다.' });
+        }
+      });
+      return;
+    }
+    return send(res, 405, { error: 'GET 또는 POST만 됩니다.' });
   }
 
   if (url.pathname === '/api/prefs') {
