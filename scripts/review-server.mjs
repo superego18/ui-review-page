@@ -4,12 +4,13 @@
 //   <dir>/review.html 과 캡처 이미지를 정적으로 제공하고,
 //   페이지가 보낸 평가를 <dir>/r<round>.json 에, 대화를 <dir>/chat.json 에 저장한다.
 //   세션별 대화: 등록된 세션(<dir>/sessions/)을 /api/sessions 로 알려 주고, 메시지는 to(받는 세션)·session(보낸 세션)으로 나눈다.
+//   보관함: 나중에 보낼 메시지를 <dir>/drafts.json 에 세션별로 모았다가, 사용자가 고른 것만 하나로 묶거나 따로 보낸다(/api/drafts).
 //   Codex 세션에게 온 메시지는 `codex queue` 로 그 세션에 바로 넣어 깨운다(감시 명령이 필요 없다). 답은 Codex 대화 기록에서 읽어 보여 준다.
 
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -111,6 +112,128 @@ function findSession(id) {
 
 // Codex 세션은 훅이 없어서 대화 기록 파일에서 사용자 입력과 에이전트 답만 뽑아 보여 준다(내부 형식).
 // Claude 세션은 hook-relay.mjs 훅이 chat.json 으로 보내므로 여기서는 읽지 않는다.
+const sid = (v) => (typeof v === 'string' && /^[\w.-]{1,80}$/.test(v) ? v : undefined);
+
+function cleanWhere(w) {
+  if (!w || typeof w !== 'object') return undefined;
+  const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined);
+  const num = (o) => (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).filter(([, v]) => Number.isFinite(v)).slice(0, 4)) : undefined);
+  return { url: str(w.url, 300), selector: str(w.selector, 300), text: str(w.text, 120), rect: num(w.rect), viewport: num(w.viewport) };
+}
+
+// 대화 기록에 메시지를 더하고, Codex 세션에게 온 사용자 메시지는 그 세션에 바로 넣는다.
+function addChat(msg) {
+  const text = typeof msg.text === 'string' ? msg.text.trim().slice(0, 12000) : '';
+  if (!text || !['user', 'agent'].includes(msg.from)) return null;
+  const chat = readChat();
+  const entry = { id: chat.messages.length + 1, from: msg.from, text, round: Number(msg.round) || null, at: new Date().toISOString() };
+  if (msg.from === 'agent' && typeof msg.agent === 'string') entry.agent = msg.agent.slice(0, 40);
+  // 사용자 메시지는 받을 세션(to), 에이전트 답과 터미널 입력은 그 세션(session)을 적는다.
+  if (sid(msg.to)) entry.to = msg.to;
+  if (sid(msg.session)) entry.session = msg.session;
+  if (typeof msg.context === 'string') entry.context = msg.context.slice(0, 20);
+  if (cleanWhere(msg.where)) entry.where = cleanWhere(msg.where);
+  chat.messages.push(entry);
+  fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
+  const target = entry.from === 'user' && entry.to ? findSession(entry.to) : null;
+  if (target?.tool === 'codex') queueToCodex(target, entry);
+  return entry;
+}
+
+// ── 보관함 ──
+const draftsFile = path.join(root, 'drafts.json');
+const projectDir = path.dirname(root);
+
+function readDrafts() {
+  try {
+    return JSON.parse(fs.readFileSync(draftsFile, 'utf8'));
+  } catch {
+    return { nextId: 1, drafts: [] };
+  }
+}
+
+function writeDrafts(d) {
+  fs.writeFileSync(draftsFile, JSON.stringify(d, null, 2) + '\n');
+}
+
+// 저장 당시 코드 버전. 나중에 화면이 바뀌어도 세션이 그때 코드와 비교해 어디를 말한 것인지 찾게 한다.
+function currentCommit() {
+  try {
+    return execFileSync('git', ['-C', projectDir, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return null;
+  }
+}
+
+const shortTime = (iso) => new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+// 보관함 항목 하나를 보낼 글로 만든다. 위치는 저장 당시 맥락(시각·커밋·문구)을 함께 적는다.
+function draftText(d) {
+  const lines = [d.text];
+  if (d.where?.url || d.where?.selector) {
+    lines.push(`위치(${shortTime(d.at)} 저장${d.commit ? ` · 커밋 ${d.commit}` : ''} 기준): ${d.where.url || ''}${d.where.selector ? ' · ' + d.where.selector : ''}${d.where.text ? ` · 당시 문구 "${d.where.text}"` : ''}`);
+  }
+  if (d.round) lines.push(`(${d.round}차 리뷰를 보다가 남김)`);
+  return lines.join('\n');
+}
+
+// 고른 항목을 받는 세션별로 묶어 보낸다. combine 이면 세션마다 번호 매긴 메시지 하나, 아니면 하나씩.
+function sendDrafts(ids, combine) {
+  const store = readDrafts();
+  const picked = store.drafts.filter((d) => ids.includes(d.id));
+  const bySession = new Map();
+  for (const d of picked) bySession.set(d.to, [...(bySession.get(d.to) || []), d]);
+  const sent = [];
+  for (const [to, list] of bySession) {
+    if (combine && list.length > 1) {
+      const text = `보관함에서 모아 보낸 ${list.length}개입니다.\n\n` + list.map((d, i) => `${i + 1}. ${draftText(d).replace(/\n/g, '\n   ')}`).join('\n\n');
+      sent.push(addChat({ from: 'user', to, text, context: list.every((d) => d.context === 'review') ? 'review' : 'app' }));
+    } else {
+      for (const d of list) sent.push(addChat({ from: 'user', to, text: draftText(d), context: d.context, round: d.round, where: d.where }));
+    }
+  }
+  store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
+  writeDrafts(store);
+  return sent.filter(Boolean);
+}
+
+// 보관함 요청: add(새 항목) · update(글·받는 세션·위치 고치기) · delete · send
+function handleDrafts(req) {
+  const store = readDrafts();
+  const ids = Array.isArray(req.ids) ? req.ids.filter(Number.isInteger) : [];
+  if (req.action === 'add') {
+    const text = typeof req.text === 'string' ? req.text.trim().slice(0, 4000) : '';
+    if (!text || !sid(req.to)) return { status: 400, body: { error: 'text와 to(세션)가 필요합니다.' } };
+    const d = { id: store.nextId++, to: req.to, text, context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString() };
+    store.drafts.push(d);
+    writeDrafts(store);
+    return { status: 200, body: d };
+  }
+  if (req.action === 'update') {
+    const d = store.drafts.find((x) => x.id === req.id);
+    if (!d) return { status: 404, body: { error: '없는 항목입니다.' } };
+    if (typeof req.text === 'string' && req.text.trim()) d.text = req.text.trim().slice(0, 4000);
+    if (sid(req.to)) d.to = req.to;
+    if (req.where !== undefined) {
+      d.where = cleanWhere(req.where);
+      d.commit = currentCommit();
+      d.at = new Date().toISOString();
+    }
+    writeDrafts(store);
+    return { status: 200, body: d };
+  }
+  if (req.action === 'delete') {
+    store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
+    writeDrafts(store);
+    return { status: 200, body: { ok: true } };
+  }
+  if (req.action === 'send') {
+    if (!ids.length) return { status: 400, body: { error: '보낼 항목(ids)이 필요합니다.' } };
+    return { status: 200, body: { sent: sendDrafts(ids, req.combine !== false) } };
+  }
+  return { status: 400, body: { error: 'action은 add·update·delete·send 중 하나입니다.' } };
+}
+
 const QUEUE_PREFIX = '[대화/피드백 · ';
 
 // 페이지 메시지를 실행 중인 Codex 세션에 넣는다. 쉬고 있으면 바로 새 턴이 시작되고, 작업 중이면 그 턴이 끝난 뒤 처리된다.
@@ -245,6 +368,29 @@ const server = http.createServer((req, res) => {
     return send(res, 200, readTranscript(url.searchParams.get('session') || ''));
   }
 
+  if (url.pathname === '/api/drafts') {
+    if (req.method === 'GET') return send(res, 200, { drafts: readDrafts().drafts });
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > MAX_BODY) req.destroy();
+      });
+      req.on('end', () => {
+        let r;
+        try {
+          r = JSON.parse(body);
+        } catch {
+          return send(res, 400, { error: 'JSON 형식이 아닙니다.' });
+        }
+        const out = handleDrafts(r);
+        send(res, out.status, out.body);
+      });
+      return;
+    }
+    return send(res, 405, { error: 'GET 또는 POST만 됩니다.' });
+  }
+
   if (url.pathname === '/api/chat') {
     if (req.method === 'GET') return send(res, 200, readChat());
     if (req.method === 'POST') {
@@ -260,28 +406,8 @@ const server = http.createServer((req, res) => {
         } catch {
           return send(res, 400, { error: 'JSON 형식이 아닙니다.' });
         }
-        const text = typeof msg.text === 'string' ? msg.text.trim().slice(0, 4000) : '';
-        if (!text || !['user', 'agent'].includes(msg.from)) {
-          return send(res, 400, { error: 'from(user|agent)과 text가 필요합니다.' });
-        }
-        const chat = readChat();
-        const entry = { id: chat.messages.length + 1, from: msg.from, text, round: Number(msg.round) || null, at: new Date().toISOString() };
-        if (msg.from === 'agent' && typeof msg.agent === 'string') entry.agent = msg.agent.slice(0, 40);
-        // 사용자 메시지는 받을 세션(to), 에이전트 답과 터미널 입력은 그 세션(session)을 적는다.
-        const sid = (v) => (typeof v === 'string' && /^[\w.-]{1,80}$/.test(v) ? v : undefined);
-        if (sid(msg.to)) entry.to = msg.to;
-        if (sid(msg.session)) entry.session = msg.session;
-        if (typeof msg.context === 'string') entry.context = msg.context.slice(0, 20);
-        if (msg.where && typeof msg.where === 'object') {
-          const w = msg.where;
-          const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined);
-          const num = (o) => (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).filter(([, v]) => Number.isFinite(v)).slice(0, 4)) : undefined);
-          entry.where = { url: str(w.url, 300), selector: str(w.selector, 300), text: str(w.text, 120), rect: num(w.rect), viewport: num(w.viewport) };
-        }
-        chat.messages.push(entry);
-        fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
-        const target = entry.from === 'user' && entry.to ? findSession(entry.to) : null;
-        if (target?.tool === 'codex') queueToCodex(target, entry);
+        const entry = addChat(msg);
+        if (!entry) return send(res, 400, { error: 'from(user|agent)과 text가 필요합니다.' });
         send(res, 200, entry);
       });
       return;

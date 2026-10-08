@@ -137,6 +137,23 @@
   .peek b { display: block; font-size: 12px; color: var(--accent); margin-bottom: 2px; }
   @media (prefers-reduced-motion: reduce) { .tabs .dot.busy, .typing .dots i { animation: none; } }
   .compose textarea:disabled, .compose button:disabled { opacity: .5; cursor: default; }
+  .compose .later { background: var(--sheet); color: var(--ink); box-shadow: inset 0 0 0 1px var(--rule); }
+  .drow { display: flex; padding: 8px 10px 0; border-top: 1px solid var(--rule); }
+  .drow button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; }
+  .drow button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: transparent; }
+  .drafts { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--paper); }
+  .drafts[hidden], .msgs[hidden], .compose[hidden], .dfoot[hidden] { display: none; }
+  .draft { background: var(--sheet); border-radius: 9px; box-shadow: 0 0 0 1px var(--rule); padding: 9px 10px; display: grid; gap: 6px; }
+  .draft .top { display: flex; gap: 8px; align-items: flex-start; }
+  .draft input[type=checkbox] { margin-top: 8px; flex-shrink: 0; accent-color: var(--accent); }
+  .draft textarea { min-height: 38px; }
+  .draft .meta { font-size: 11px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 4px 8px; }
+  .draft .acts { display: flex; flex-wrap: wrap; gap: 4px; }
+  .draft .acts button, .draft .acts select { font: inherit; font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; }
+  .draft .acts .send1 { background: var(--ink); color: var(--paper); border-color: transparent; }
+  .dfoot { display: flex; gap: 8px; align-items: center; padding: 10px; font-size: 13px; color: var(--ink-2); border-top: 1px solid var(--rule); }
+  .dfoot button { margin-left: auto; font: inherit; font-weight: 600; font-size: 14px; padding: 9px 14px; border-radius: 8px; border: 0; background: var(--ink); color: var(--paper); cursor: pointer; }
+  .dfoot button:disabled { opacity: .4; cursor: default; }
   .tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; }
   .msg.user .tag { background: rgba(255,255,255,.22); color: #fff; }
   .msg.agent .tag { background: var(--paper); color: var(--ink-2); }
@@ -170,8 +187,12 @@
     <p id="chatMode" data-auto="off"></p>
   </header>
   <div class="msgs" id="msgs" aria-live="polite"></div>
+  <div class="drafts" id="drafts" hidden></div>
+  <div class="drow"><button type="button" id="draftsBtn" aria-pressed="false">보관함</button></div>
+  <div class="dfoot" id="dfoot" hidden><label><input type="checkbox" id="dall"> 전체</label><button type="button" id="dsend" disabled>선택한 것 보내기</button></div>
   <form class="compose" id="compose">
     <textarea id="chatInput" rows="1" placeholder="질문이나 요청 · Enter 보내기" aria-label="메시지"></textarea>
+    <button type="button" class="later" id="laterBtn" title="보내지 않고 보관함에 담아 두기">나중에</button>
     <button type="submit" id="sendBtn">보내기</button>
   </form>
 </section>
@@ -741,6 +762,8 @@ function renderChat() {
   $('#chatInput').placeholder = target ? `${target.name}에게 질문이나 요청 · Enter 보내기` : '등록된 세션이 없습니다';
   markSeenVisible();
   updateBadges();
+  updateDraftsBtn();
+  if (showDrafts && !$('#drafts').contains(document.activeElement)) renderDrafts(); // 고치는 중인 글은 다시 그리지 않는다
 }
 
 function updateBadges() {
@@ -802,8 +825,15 @@ function peekNew() {
 let chatKey = '';
 async function pollChat() {
   try {
-    const [c, ss] = await Promise.all([fetch('/api/chat').then((r) => r.json()), fetch('/api/sessions').then((r) => r.json())]);
+    const [c, ss, dd] = await Promise.all([fetch('/api/chat').then((r) => r.json()), fetch('/api/sessions').then((r) => r.json()), fetch('/api/drafts').then((r) => r.json())]);
     chatMessages = c.messages || [];
+    const dk = JSON.stringify(dd.drafts || []);
+    if (dk !== draftsKey) {
+      draftsKey = dk;
+      drafts = dd.drafts || [];
+      updateDraftsBtn();
+      if (showDrafts && !$('#drafts').contains(document.activeElement)) renderDrafts();
+    }
     sessions = ss.sessions || [];
     for (const x of sessions.filter((x) => x.tool === 'codex')) {
       transcripts[x.id] = (await fetch('/api/transcript?session=' + encodeURIComponent(x.id)).then((r) => r.json())).items || [];
@@ -861,6 +891,115 @@ $('#chatInput').addEventListener('keydown', (e) => {
     $('#compose').requestSubmit();
   }
 });
+
+// ── 보관함: 나중에 보낼 메시지를 세션별로 모았다가 골라서 보낸다(리뷰 서버 drafts.json, 앱 화면과 같은 보관함) ──
+let drafts = [];
+let draftsKey = '';
+let showDrafts = false;
+const checked = new Set();
+const draftsApi = async (body) => {
+  const r = await fetch('/api/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  await pollChat();
+  return r.json();
+};
+const mineDrafts = () => drafts.filter((d) => d.to === activeTab);
+
+function updateDraftsBtn() {
+  const n = mineDrafts().length;
+  $('#draftsBtn').textContent = showDrafts ? '대화로 돌아가기' : n ? `보관함 ${n}` : '보관함';
+  $('#draftsBtn').setAttribute('aria-pressed', String(showDrafts));
+}
+
+function renderDrafts() {
+  const box = $('#drafts');
+  box.textContent = '';
+  const list = mineDrafts();
+  for (const id of [...checked]) if (!list.some((d) => d.id === id)) checked.delete(id);
+  if (!list.length) {
+    const p = document.createElement('p');
+    p.className = 'empty';
+    p.textContent = '보관함이 비어 있습니다.\n글을 쓰고 "나중에"를 누르면 여기에 담깁니다.';
+    box.append(p);
+  }
+  for (const d of list) {
+    const card = document.createElement('div');
+    card.className = 'draft';
+    const top = document.createElement('div');
+    top.className = 'top';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = checked.has(d.id);
+    cb.setAttribute('aria-label', '보낼 항목으로 고르기');
+    cb.onchange = () => { cb.checked ? checked.add(d.id) : checked.delete(d.id); updateFoot(); };
+    const ta = document.createElement('textarea');
+    ta.value = d.text;
+    ta.rows = Math.min(5, d.text.split('\n').length + 1);
+    ta.setAttribute('aria-label', '보관한 메시지');
+    ta.onchange = () => { if (ta.value.trim()) draftsApi({ action: 'update', id: d.id, text: ta.value }); };
+    top.append(cb, ta);
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = [
+      new Date(d.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      d.round ? `${d.round}차 리뷰` : d.where?.url ? `앱 ${d.where.url}` : '',
+      d.where?.text ? `위치 "${d.where.text}"` : '',
+    ].filter(Boolean).join(' · ');
+    const acts = document.createElement('div');
+    acts.className = 'acts';
+    const btn = (label, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = fn; acts.append(b); };
+    btn('이것만 보내기', () => sendDrafts([d.id]), 'send1');
+    if (sessions.length > 1) {
+      const sel = document.createElement('select');
+      sel.setAttribute('aria-label', '받을 세션 바꾸기');
+      for (const x of sessions) { const o = document.createElement('option'); o.value = x.id; o.textContent = x.id === d.to ? `${x.name}에게` : `${x.name}(으)로 옮기기`; sel.append(o); }
+      sel.value = d.to;
+      sel.onchange = () => draftsApi({ action: 'update', id: d.id, to: sel.value });
+      acts.append(sel);
+    }
+    btn('지우기', () => draftsApi({ action: 'delete', ids: [d.id] }));
+    card.append(top, meta, acts);
+    box.append(card);
+  }
+  updateFoot();
+}
+
+function updateFoot() {
+  const n = mineDrafts().filter((d) => checked.has(d.id)).length;
+  $('#dsend').disabled = n === 0;
+  $('#dsend').textContent = n > 1 ? `선택한 ${n}개 한 번에 보내기` : '선택한 것 보내기';
+  $('#dall').checked = n > 0 && n === mineDrafts().length;
+}
+
+async function sendDrafts(ids) {
+  await draftsApi({ action: 'send', ids, combine: true });
+  ids.forEach((id) => checked.delete(id));
+  if (!mineDrafts().length) setDraftsView(false);
+  else renderDrafts();
+}
+
+function setDraftsView(on) {
+  showDrafts = on;
+  $('#msgs').hidden = on;
+  $('#drafts').hidden = !on;
+  $('#dfoot').hidden = !on;
+  $('#compose').hidden = on;
+  updateDraftsBtn();
+  if (on) renderDrafts();
+  else { scrollToUnread = true; renderChat(); }
+}
+$('#draftsBtn').onclick = () => setDraftsView(!showDrafts);
+$('#dall').onchange = () => { mineDrafts().forEach((d) => ($('#dall').checked ? checked.add(d.id) : checked.delete(d.id))); renderDrafts(); };
+$('#dsend').onclick = () => sendDrafts(mineDrafts().filter((d) => checked.has(d.id)).map((d) => d.id));
+$('#laterBtn').onclick = async () => {
+  const text = $('#chatInput').value.trim();
+  if (!text || !sessionById(activeTab)) return;
+  $('#chatInput').value = '';
+  try {
+    await draftsApi({ action: 'add', to: activeTab, text, context: 'review', round: REVIEW.round });
+  } catch {
+    $('#chatInput').value = text;
+  }
+};
 
 pollChat();
 setInterval(pollChat, 3000);
