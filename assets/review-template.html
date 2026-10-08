@@ -113,7 +113,7 @@
   .msg time { display: block; font-size: 10px; opacity: .7; margin-top: 3px; }
   .waiting { align-self: flex-start; font-size: 12px; color: var(--ink-3); }
   .compose { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--rule); align-items: flex-end; }
-  .compose textarea { min-height: 40px; max-height: 50vh; resize: vertical; }
+  .compose textarea { height: 80px; min-height: 40px; max-height: 50vh; resize: vertical; }
   .compose button { height: 40px; flex-shrink: 0; white-space: nowrap; font: inherit; font-weight: 600; font-size: 14px; padding: 0 14px; border-radius: 8px; border: 0; background: var(--ink); color: var(--paper); cursor: pointer; }
   .target { display: flex; gap: 4px; padding: 8px 10px 0; border-top: 1px solid var(--rule); align-items: center; font-size: 12px; color: var(--ink-3); }
   .target button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; }
@@ -892,14 +892,27 @@ $('#compose').onsubmit = async (e) => {
 // 입력칸: 글이 길어지면 자동으로 늘어나고(화면 절반까지), 오른쪽 아래 모서리를 끌어 직접 키우거나 줄일 수도 있다.
 // 입력칸은 대화 창 높이의 40%까지만 커진다. 커진 만큼 대화 목록이 줄어들 뿐 겹치지 않고, 아래 끝을 보던 중이면 계속 아래 끝을 보여 준다.
 const inputMax = () => Math.round($('#chat').getBoundingClientRect().height * 0.4) || 200;
+// 직접 끌어 정한 높이는 기억해서 다음에도 그 높이로 시작하고, 글을 비우면 그 높이로 돌아간다(기본 80px).
+let inputBase = null;
+try { inputBase = Number(localStorage.getItem('chatInputH')) || null; } catch {}
 function autoGrow(el) {
   const max = inputMax();
   el.style.maxHeight = max + 'px';
-  if (!el.value) { el.style.height = ''; return; }
+  if (!el.value) { el.style.height = inputBase ? Math.min(inputBase, max) + 'px' : ''; return; }
   if (el.scrollHeight > el.clientHeight) el.style.height = Math.min(el.scrollHeight + 2, max) + 'px';
 }
+autoGrow($('#chatInput'));
 $('#chatInput').addEventListener('input', () => autoGrow($('#chatInput')));
-$('#chatInput').addEventListener('pointerdown', () => { $('#chatInput').style.maxHeight = inputMax() + 'px'; });
+$('#chatInput').addEventListener('pointerdown', () => {
+  const el = $('#chatInput');
+  el.style.maxHeight = inputMax() + 'px';
+  const before = el.offsetHeight;
+  addEventListener('pointerup', () => {
+    if (el.offsetHeight === before) return;
+    inputBase = el.offsetHeight;
+    try { localStorage.setItem('chatInputH', String(inputBase)); } catch {}
+  }, { once: true });
+});
 {
   let gap = 0;
   $('#msgs').addEventListener('scroll', () => { const b = $('#msgs'); gap = b.scrollHeight - b.scrollTop - b.clientHeight; });
