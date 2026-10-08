@@ -191,6 +191,8 @@ function savePrefs(req) {
   if ('panel' in req) cur.panel = req.panel && num(req.panel.w) && num(req.panel.h) ? { w: num(req.panel.w), h: num(req.panel.h) } : null;
   if ('inputH' in req) cur.inputH = num(req.inputH);
   if ('tab' in req && sid(req.tab)) prefs.tab = req.tab;
+  // 보관함에 담을 때 마지막으로 고른 분류(두 화면 공용)
+  if ('draftLabel' in req) prefs.draftLabel = typeof req.draftLabel === 'string' && req.draftLabel.trim() ? req.draftLabel.trim().slice(0, 30) : null;
   // 세션마다 보고 있던 메시지(맨 위에 보이던 메시지 id, 맨 아래면 'bottom'). 화면 폭과 상관없이 같은 메시지로 돌아간다.
   if (req.pos && sid(req.pos.session) && typeof req.pos.id === 'string' && req.pos.id.length < 80) prefs.pos = { ...(prefs.pos || {}), [req.pos.session]: req.pos.id };
   if ('panel' in req || 'inputH' in req) prefs[device] = cur;
@@ -275,6 +277,8 @@ function currentCommit() {
 
 const shortTime = (iso) => new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
+const cleanLabel = (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 30) : null);
+
 // 보관함 항목 하나를 보낼 글로 만든다. 위치는 저장 당시 맥락(시각·커밋·문구)을 함께 적는다.
 function draftText(d) {
   const lines = [d.text];
@@ -289,15 +293,21 @@ function draftText(d) {
 function sendDrafts(ids, combine) {
   const store = readDrafts();
   const picked = store.drafts.filter((d) => ids.includes(d.id));
-  const bySession = new Map();
-  for (const d of picked) bySession.set(d.to, [...(bySession.get(d.to) || []), d]);
+  // 받는 세션과 분류가 같은 것끼리 한 메시지로 묶는다. 받는 세션도 분류 단위로 처리할 수 있게 첫 줄에 분류를 적는다.
+  const groups = new Map();
+  for (const d of picked) {
+    const k = d.to + '\u0000' + (d.label || '');
+    groups.set(k, [...(groups.get(k) || []), d]);
+  }
   const sent = [];
-  for (const [to, list] of bySession) {
+  for (const list of groups.values()) {
+    const to = list[0].to;
+    const label = list[0].label;
     if (combine && list.length > 1) {
-      const text = `보관함에서 모아 보낸 ${list.length}개입니다.\n\n` + list.map((d, i) => `${i + 1}. ${draftText(d).replace(/\n/g, '\n   ')}`).join('\n\n');
+      const text = `${label ? `[${label}] ` : ''}보관함에서 모아 보낸 ${list.length}개입니다.\n\n` + list.map((d, i) => `${i + 1}. ${draftText(d).replace(/\n/g, '\n   ')}`).join('\n\n');
       sent.push(addChat({ from: 'user', to, text, context: list.every((d) => d.context === 'review') ? 'review' : 'app' }));
     } else {
-      for (const d of list) sent.push(addChat({ from: 'user', to, text: draftText(d), context: d.context, round: d.round, where: d.where }));
+      for (const d of list) sent.push(addChat({ from: 'user', to, text: (label ? `[${label}] ` : '') + draftText(d), context: d.context, round: d.round, where: d.where }));
     }
   }
   store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
@@ -312,7 +322,7 @@ function handleDrafts(req) {
   if (req.action === 'add') {
     const text = typeof req.text === 'string' ? req.text.trim().slice(0, 4000) : '';
     if (!text || !sid(req.to)) return { status: 400, body: { error: 'text와 to(세션)가 필요합니다.' } };
-    const d = { id: store.nextId++, to: req.to, text, context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString() };
+    const d = { id: store.nextId++, to: req.to, text, label: cleanLabel(req.label), context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString() };
     store.drafts.push(d);
     writeDrafts(store);
     return { status: 200, body: d };
@@ -322,6 +332,7 @@ function handleDrafts(req) {
     if (!d) return { status: 404, body: { error: '없는 항목입니다.' } };
     if (typeof req.text === 'string' && req.text.trim()) d.text = req.text.trim().slice(0, 4000);
     if (sid(req.to)) d.to = req.to;
+    if ('label' in req) d.label = cleanLabel(req.label);
     if (req.where !== undefined) {
       d.where = cleanWhere(req.where);
       d.commit = currentCommit();
