@@ -11,6 +11,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -18,6 +19,7 @@ function arg(name, fallback) {
 }
 
 const root = path.resolve(arg('dir', '.ui-feedback'));
+const widgetPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'app-widget.js');
 const port = Number(arg('port', '4799'));
 const MAX_BODY = 256 * 1024;
 const TYPES = {
@@ -331,6 +333,14 @@ function readReviewWatch(sessionKey) {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
+
+  // 대화/피드백 위젯(assets/app-widget.js)은 앱 화면(app-proxy)과 리뷰 페이지가 같은 파일을 쓴다.
+  // 위젯은 /__uifb/api/* 로 부르므로, 리뷰 서버에서는 앞의 /__uifb 를 떼고 같은 API 로 처리한다.
+  if (url.pathname === '/__uifb/widget.js') {
+    res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(fs.readFileSync(widgetPath));
+  }
+  if (url.pathname.startsWith('/__uifb/api/')) url.pathname = url.pathname.slice('/__uifb'.length);
 
   if (url.pathname === '/favicon.ico') {
     res.writeHead(204);
