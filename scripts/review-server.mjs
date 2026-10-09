@@ -177,7 +177,7 @@ function readDelivered() {
 }
 function markDelivered(id, msgId) {
   const d = readDelivered();
-  if (!(d[id] >= msgId)) fs.writeFileSync(deliveredFile, JSON.stringify({ ...d, [id]: msgId }, null, 2) + '\n');
+  if (!(d[id] >= msgId)) fs.writeFileSync(deliveredFile, JSON.stringify({ ...d, [id]: msgId, _at: { ...(d._at || {}), [msgId]: new Date().toISOString() } }, null, 2) + '\n');
 }
 
 const seenFile = path.join(root, 'seen.json');
