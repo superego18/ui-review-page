@@ -197,6 +197,7 @@ function addChat(msg) {
   if (msg.device === 'mobile' || msg.device === 'desktop') entry.device = msg.device;
   if (cleanWhere(msg.where)) entry.where = cleanWhere(msg.where);
   if (Number.isInteger(msg.replyTo) && msg.replyTo > 0 && msg.replyTo < entry.id) entry.replyTo = msg.replyTo;
+  if (msg.interject === true && entry.from === 'user') entry.interject = true;
   if (Number.isInteger(msg.resendOf) && msg.resendOf > 0 && msg.resendOf < entry.id) entry.resendOf = msg.resendOf;
   chat.messages.push(entry);
   fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
