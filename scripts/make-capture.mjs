@@ -9,6 +9,7 @@
 //       marks: [{ n: 1, selector: '.summary' }],      // 번호 상자
 //       mocks: [{ url: '**/api/items**', label: '목록 API', json: [...] }],   // 예시 응답. 복잡하면 handle: async (route) => …
 //       steps: async (page) => { await page.click('text=열기'); },          // 찍기 전에 화면 상태 만들기
+//       html: true,                                   // 움직이는 조각도 남기기(애니메이션·hover·전환 비교용). <dir>/r<차수>-<이름>.snap.html
 //     })
 //   결과 파일: <dir>/capture.js(매번 덮어씀). 이미지: <dir>/r<차수>-<이름>.png
 //   레시피 코드는 그대로 실행되므로 이 프로젝트에서 직접 쓴 레시피만 쓴다.
@@ -39,7 +40,10 @@ if (!fs.existsSync(recipeFile)) {
 }
 const recipe = fs.readFileSync(recipeFile, 'utf8').trim().replace(/;\s*$/, '');
 const file = `r${round}-${name}.png`;
-const meta = { out: path.join(dir, file), file, recipe: name, round, base, record: `http://localhost:${port}/api/captures` };
+const meta = {
+  out: path.join(dir, file), file, recipe: name, round, base, record: `http://localhost:${port}/api/captures`,
+  snap: `r${round}-${name}.snap.html`, snapRecord: `http://localhost:${port}/api/snapshots`,
+};
 
 const template = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'capture-2x.js'), 'utf8');
 const out = template.replace('__RECIPE__', `(${recipe})`).replace('__META__', JSON.stringify(meta));

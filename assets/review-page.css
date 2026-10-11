@@ -29,7 +29,13 @@ header p { color: var(--ink-2); margin: 0; line-height: 1.6; }
 .shotrow { display: grid; gap: 6px; min-width: 0; }
 .rowlabel { margin: 0; font-size: 12px; font-weight: 600; color: var(--ink-3); }
 .shotgrid { display: grid; gap: 12px var(--colgap); align-items: start; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); }
-.shotrow.mobile figure > button { max-width: 300px; }
+.shotrow.mobile figure > button, .shotrow.mobile figure > .livewrap { max-width: 300px; }
+.livewrap { position: relative; width: 100%; overflow: hidden; border-radius: 6px; outline: 1px solid var(--rule); outline-offset: -1px; }
+.livewrap iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; }
+.item:not(.live) .livewrap, .item.live figure.haslive > button { display: none; }
+.livetoggle { display: flex; gap: 4px; }
+.livetoggle button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; }
+.livetoggle button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .shots .divider { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); pointer-events: none; }
 .shotrow > .marklegend { position: relative; background: var(--sheet); padding: 4px 0; }
 figure { margin: 0; min-width: 0; display: grid; gap: 6px; }

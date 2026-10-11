@@ -24,6 +24,81 @@ async (page) => {
   // 버튼 클릭·입력처럼 캡처 전에 화면 상태를 만드는 단계
   if (RECIPE.steps) await RECIPE.steps(page);
 
+  // 움직이는 조각(RECIPE.html): 찍는 부분의 HTML과 페이지 CSS를 그대로 떼어 한 파일로 남긴다. 글꼴·이미지는 품어서
+  // 앱 서버 없이도(휴대폰에서도) 열린다. CSS 애니메이션·전환·hover·창 폭 반응은 살아 있고, 자바스크립트 동작은 없다.
+  const snap = RECIPE.html ? await page.evaluate(async (selector) => {
+    const cache = new Map();
+    const toData = (u) => {
+      if (!cache.has(u)) {
+        cache.set(u, fetch(u).then((r) => (r.ok ? r.blob() : null)).then((b) => (b && b.size < 3e6
+          ? new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); })
+          : u)).catch(() => u));
+      }
+      return cache.get(u);
+    };
+    const inlineUrls = async (css, base) => {
+      let out = css;
+      for (const m of new Set([...css.matchAll(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g)].map((x) => x[0]))) {
+        const u = /url\(\s*(['"]?)([^'")]+)\1\s*\)/.exec(m)[2];
+        if (u.startsWith('data:') || u.startsWith('#')) continue;
+        out = out.split(m).join(`url("${await toData(new URL(u, base).href)}")`);
+      }
+      return out;
+    };
+    let imports = '';
+    let css = '';
+    for (const sheet of [...document.styleSheets, ...(document.adoptedStyleSheets || [])]) {
+      try {
+        css += (await inlineUrls([...sheet.cssRules].map((r) => r.cssText).join('\n'), sheet.href || location.href)) + '\n';
+      } catch {
+        if (sheet.href) imports += `@import url("${sheet.href}");\n`;
+      }
+    }
+    const target = selector ? document.querySelector(selector) : document.body;
+    const rect = target.getBoundingClientRect();
+    const clone = target.cloneNode(true);
+    // 입력칸 값·체크·고른 항목은 속성이 아니라 상태라서 복제에 안 따라오므로 속성으로 옮긴다. 이미지는 품는다.
+    const from = [target, ...target.querySelectorAll('*')];
+    const to = [clone, ...clone.querySelectorAll('*')];
+    for (let i = 0; i < from.length; i++) {
+      const s = from[i], d = to[i];
+      if (s instanceof HTMLInputElement) {
+        if (s.type === 'checkbox' || s.type === 'radio') d.toggleAttribute('checked', s.checked);
+        else d.setAttribute('value', s.value);
+      } else if (s instanceof HTMLTextAreaElement) d.textContent = s.value;
+      else if (s instanceof HTMLSelectElement) [...d.options].forEach((o, j) => o.toggleAttribute('selected', j === s.selectedIndex));
+      else if (s instanceof HTMLImageElement && s.currentSrc) { d.src = await toData(s.currentSrc); d.removeAttribute('srcset'); }
+    }
+    clone.querySelectorAll('script, noscript, nextjs-portal, source[srcset]').forEach((n) => n.remove());
+    // 고른 부분만 떼면 조상 선택자(.app .card 같은)가 안 맞으므로 조상을 빈 껍데기로 감싸 되살린다. 껍데기는 배치에 끼어들지 않게 푼다.
+    let node = clone;
+    if (selector) {
+      clone.style.width = rect.width + 'px';
+      clone.style.boxSizing = 'border-box';
+      clone.style.margin = '0';
+      for (let a = target.parentElement; a && a !== document.body; a = a.parentElement) {
+        const shell = document.createElement(a.tagName.toLowerCase());
+        for (const at of a.attributes) shell.setAttribute(at.name, at.value);
+        shell.style.cssText += ';display:block;position:static;width:auto;height:auto;min-height:0;max-height:none;margin:0;padding:0;border:0;overflow:visible;transform:none';
+        shell.append(node);
+        node = shell;
+      }
+    }
+    let bg = 'transparent';
+    for (let a = target; a; a = a.parentElement) {
+      const c = getComputedStyle(a).backgroundColor;
+      if (c && c !== 'transparent' && !/rgba\(.*,\s*0\)$/.test(c)) { bg = c; break; }
+    }
+    const attrs = (el) => [...el.attributes].map((at) => `${at.name}="${at.value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"`).join(' ');
+    const body = selector ? node.outerHTML : node.innerHTML;
+    const html = `<!doctype html><html ${attrs(document.documentElement)}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`
+      + `<style>${(imports + css).replace(/<\/style/gi, '<\\/style')}</style>`
+      + `<style>html,body{margin:0!important;padding:0!important;min-height:0!important;background:${bg}!important}</style></head>`
+      + `<body ${attrs(document.body)}>${body}${selector ? '' : `<script>scrollTo(0, ${Math.round(scrollY)})</script>`}</body></html>`;
+    return { html, w: Math.round(selector ? rect.width : innerWidth), h: Math.round(selector ? rect.height : innerHeight), vw: innerWidth };
+  }, SELECTOR) : null;
+  if (snap) await page.request.post(META.snapRecord, { data: { file: META.snap, html: snap.html } });
+
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Emulation.setDeviceMetricsOverride', { ...VIEWPORT, deviceScaleFactor: 2, mobile: VIEWPORT.width < 768 });
   let clip;
@@ -90,6 +165,8 @@ async (page) => {
   const image = {
     file: META.file,
     ...(measured.marks.length ? { marks: measured.marks } : {}),
+    // 움직이는 조각: 비교 페이지에서 "움직여 보기"로 이 캡처 자리에 띄운다. w·h 는 떼어 낸 부분 크기, vw 는 찍을 때 창 폭.
+    ...(snap ? { live: { file: META.snap, w: snap.w, h: snap.h, vw: snap.vw } } : {}),
     source: {
       url: measured.url,
       viewport: `${VIEWPORT.width}×${VIEWPORT.height}`,

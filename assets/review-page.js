@@ -114,8 +114,28 @@ function markLegend(marks, texts) {
   return ul;
 }
 
+// 움직이는 조각(live)을 캡처 자리에 띄운다. 찍을 때 창 폭(vw)으로 그려야 화면 폭 규칙이 같게 맞으므로,
+// 그 폭으로 그린 뒤 칸 폭에 맞게 줄인다. 처음 "움직여 보기"를 누를 때 불러온다.
+function liveFrame(live, marks) {
+  const wrap = document.createElement('div');
+  wrap.className = 'livewrap';
+  wrap.style.aspectRatio = `${live.w} / ${live.h}`;
+  wrap.load = () => {
+    if (wrap.querySelector('iframe')) return;
+    const frame = document.createElement('iframe');
+    frame.src = live.file; frame.title = '움직이는 조각';
+    Object.assign(frame.style, { width: live.vw + 'px', height: live.h + 'px' });
+    wrap.prepend(frame);
+    const fit = () => { frame.style.transform = `scale(${wrap.clientWidth / live.w})`; };
+    new ResizeObserver(fit).observe(wrap);
+    fit();
+  };
+  drawMarks(wrap, marks);
+  return wrap;
+}
+
 function shot(image, label, tone, itemId, texts) {
-  const { file, marks, source } = imgOf(image);
+  const { file, marks, source, live } = imgOf(image);
   const f = document.createElement('figure');
   f.className = tone;
   const cap = caption(label);
@@ -134,6 +154,10 @@ function shot(image, label, tone, itemId, texts) {
   btn.append(wrap);
   btn.onclick = () => openZoom(itemId, file, marks, texts);
   f.append(cap, btn);
+  if (live) {
+    f.classList.add('haslive');
+    f.append(liveFrame(live, marks));
+  }
   const src = sourceLine(source);
   if (src) f.append(src);
   return f;
@@ -391,6 +415,22 @@ function render() {
       if (legend) row.append(legend);
       rowMarks[kind].forEach((m) => explained.add(String(m.n)));
       shots.append(row);
+    }
+    // 움직이는 조각이 있으면 캡처와 조각을 항목 단위로 바꿔 본다(전·후가 같은 방식으로 보이게).
+    if (shots.querySelector('.livewrap')) {
+      const tg = document.createElement('div');
+      tg.className = 'livetoggle';
+      for (const [on, text] of [[false, '캡처'], [true, '움직여 보기']]) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.textContent = text; b.setAttribute('aria-pressed', String(!on));
+        b.onclick = () => {
+          sec.classList.toggle('live', on);
+          tg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+          if (on) shots.querySelectorAll('.livewrap').forEach((w) => w.load());
+        };
+        tg.append(b);
+      }
+      shots.before(tg);
     }
     const v = sec.querySelector('.verdict');
     for (const key of choicesOf(it)) {

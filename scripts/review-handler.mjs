@@ -17,6 +17,7 @@ const SHARED = {
   '/__uifb/review-page.css': ['review-page.css', 'text/css; charset=utf-8'],
 };
 const MAX_BODY = 256 * 1024;
+const MAX_SNAPSHOT = 30 * 1024 * 1024; // 움직이는 조각은 글꼴·이미지를 품고 있어 크다
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.png': 'image/png',
@@ -123,6 +124,29 @@ function inner(req, res, url) {
       return;
     }
     return send(res, 405, { error: 'GET 또는 POST만 됩니다.' });
+  }
+
+  // 움직이는 조각: 캡처할 때 그 부분의 HTML·CSS를 떼어 한 파일로 남긴다(capture-2x.js 의 RECIPE.html).
+  if (url.pathname === '/api/snapshots') {
+    if (req.method !== 'POST') return send(res, 405, { error: 'POST만 됩니다.' });
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_SNAPSHOT) req.destroy();
+    });
+    req.on('end', () => {
+      try {
+        const { file, html } = JSON.parse(body);
+        if (typeof file !== 'string' || !/^[\w가-힣.-]{1,120}\.snap\.html$/.test(file) || typeof html !== 'string') {
+          return send(res, 400, { error: 'file(<이름>.snap.html)과 html 이 필요합니다.' });
+        }
+        fs.writeFileSync(path.join(root, file), html);
+        send(res, 200, { file, bytes: Buffer.byteLength(html) });
+      } catch {
+        send(res, 400, { error: 'JSON 형식이 아닙니다.' });
+      }
+    });
+    return;
   }
 
   if (url.pathname === '/api/feedback') {
