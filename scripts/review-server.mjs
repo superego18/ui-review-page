@@ -187,6 +187,7 @@ function addPeer(msg, text) {
 function cleanDraft(v) {
   if (!v || typeof v !== 'object' || !Array.isArray(v.items) || !v.items.length) return undefined;
   const items = v.items.slice(0, 50).map((d) => ({
+    ...(Number.isInteger(d?.id) ? { id: d.id } : {}), // 보관함 항목 번호(보낸 기록과 메시지를 잇는다)
     text: typeof d?.text === 'string' ? d.text.trim().slice(0, 4000) : '',
     where: cleanWhere(d?.where),
     at: typeof d?.at === 'string' && !Number.isNaN(Date.parse(d.at)) ? d.at : null,
@@ -348,13 +349,22 @@ function saveCompose(req) {
 const draftsFile = path.join(root, 'drafts.json');
 const projectDir = path.dirname(root);
 
+// trash: 보낸 것·지운 것을 7일 동안 남겨 두어, 보관함에서 확인하고 다시 담을 수 있게 한다.
+const TRASH_DAYS = 7;
 function readDrafts() {
+  let store;
   try {
-    return JSON.parse(fs.readFileSync(draftsFile, 'utf8'));
+    store = JSON.parse(fs.readFileSync(draftsFile, 'utf8'));
   } catch {
-    return { nextId: 1, drafts: [] };
+    store = { nextId: 1, drafts: [] };
   }
+  store.trash = (store.trash || []).filter((d) => Date.now() - Date.parse(d.goneAt) < TRASH_DAYS * 86_400_000);
+  return store;
 }
+const toTrash = (store, list, gone, extra = {}) => {
+  const now = new Date().toISOString();
+  store.trash.push(...list.map((d) => ({ ...d, gone, goneAt: now, ...(extra[d.id] || {}) })));
+};
 
 function writeDrafts(d) {
   fs.writeFileSync(draftsFile, JSON.stringify(d, null, 2) + '\n');
@@ -404,6 +414,10 @@ function sendDrafts(ids, combine, device) {
       for (const d of list) sent.push(addChat({ from: 'user', to, draft: { label, items: [d] }, context: d.context, round: d.round, where: d.where, device: device || d.device }));
     }
   }
+  // 보낸 항목은 어느 메시지로 갔는지(msgId)와 함께 7일 동안 남긴다.
+  const msgOf = {};
+  for (const e of sent.filter(Boolean)) for (const it of e.draft?.items || []) if (it.id) msgOf[it.id] = { msgId: e.id };
+  toTrash(store, picked, 'sent', msgOf);
   store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
   writeDrafts(store);
   return sent.filter(Boolean);
@@ -436,15 +450,24 @@ function handleDrafts(req) {
     return { status: 200, body: d };
   }
   if (req.action === 'delete') {
+    toTrash(store, store.drafts.filter((d) => ids.includes(d.id)), 'deleted');
     store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
     writeDrafts(store);
     return { status: 200, body: { ok: true } };
+  }
+  // 보낸 것·지운 것을 보관함으로 되돌린다.
+  if (req.action === 'restore') {
+    const back = store.trash.filter((d) => ids.includes(d.id));
+    store.trash = store.trash.filter((d) => !ids.includes(d.id));
+    store.drafts.push(...back.map(({ gone, goneAt, msgId, ...d }) => d));
+    writeDrafts(store);
+    return { status: 200, body: { ok: true, restored: back.length } };
   }
   if (req.action === 'send') {
     if (!ids.length) return { status: 400, body: { error: '보낼 항목(ids)이 필요합니다.' } };
     return { status: 200, body: { sent: sendDrafts(ids, req.combine !== false, req.device === 'mobile' || req.device === 'desktop' ? req.device : null) } };
   }
-  return { status: 400, body: { error: 'action은 add·update·delete·send 중 하나입니다.' } };
+  return { status: 400, body: { error: 'action은 add·update·delete·restore·send 중 하나입니다.' } };
 }
 
 const QUEUE_PREFIX = '[대화/피드백 · ';
@@ -676,7 +699,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === '/api/drafts') {
-    if (req.method === 'GET') return send(res, 200, { drafts: readDrafts().drafts });
+    if (req.method === 'GET') { const st = readDrafts(); return send(res, 200, { drafts: st.drafts, trash: st.trash }); }
     if (req.method === 'POST') {
       let body = '';
       req.on('data', (chunk) => {
