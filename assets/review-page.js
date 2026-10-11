@@ -348,9 +348,11 @@ function render() {
     const rows = { desktop: [], mobile: [] };
     for (const o of optionsOf(it)) {
       const figs = o.demo ? [demoFrame(o)] : [];
+      figs.forEach((f) => { f.style.gridColumn = optionsOf(it).indexOf(o) + 1; });
       rows.desktop.push(...figs);
       for (const x of o.shots || []) {
         const f = shot(x, o.label, o.tone || 'after', it.id, texts);
+        f.style.gridColumn = optionsOf(it).indexOf(o) + 1;
         figs.push(f);
         rows[parseInt(imgOf(x).source?.viewport, 10) < 768 ? 'mobile' : 'desktop'].push(f);
       }
@@ -359,6 +361,15 @@ function render() {
         p.className = 'optnote'; p.textContent = o.note;
         figs[0].insertBefore(p, figs[0].children[1]);
       }
+    }
+    // 안마다 한 칸을 정해 두고 데스크톱·모바일 줄이 같은 칸을 쓴다. 칸 사이에 경계선 하나를 위아래로 길게 긋는다.
+    const cols = optionsOf(it).length;
+    shots.style.setProperty('--cols', cols);
+    for (let k = 1; k < cols; k++) {
+      const line = document.createElement('span');
+      line.className = 'divider';
+      line.style.left = `calc((100% + var(--colgap)) * ${k / cols} - var(--colgap) / 2)`;
+      shots.append(line);
     }
     for (const [kind, figs] of Object.entries(rows)) {
       if (!figs.length) continue;
