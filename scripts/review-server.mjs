@@ -492,10 +492,10 @@ function draftText(d) {
 // 고른 항목을 받는 세션별로 묶어 보낸다. combine 이면 세션마다 번호 매긴 메시지 하나, 아니면 하나씩.
 // device: 보내기를 누른 화면(대화 라벨에 붙음). 항목마다 담은 화면은 본문에 "(모바일에서 남김)"으로 남는다.
 // 보류에서 보내기: 보관함 형식(분류·위치 덧붙임) 없이 처음 쓴 그대로 보낸다. 보낸 것은 7일 기록에 남긴다.
-function sendPlain(ids, device) {
+function sendPlain(ids, device, interject) {
   const store = readDrafts();
   const picked = store.drafts.filter((d) => ids.includes(d.id));
-  const sent = picked.map((d) => addChat({ from: 'user', to: d.to, text: d.text, where: d.where, context: d.context, round: d.round, device: device || d.device })).filter(Boolean);
+  const sent = picked.map((d) => addChat({ from: 'user', to: d.to, text: d.text, where: d.where, context: d.context, round: d.round, device: device || d.device, interject })).filter(Boolean);
   toTrash(store, picked, 'sent', Object.fromEntries(picked.map((d, i) => [d.id, { msgId: sent[i]?.id }])));
   store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
   writeDrafts(store);
@@ -537,7 +537,7 @@ function handleDrafts(req) {
   if (req.action === 'add') {
     const text = typeof req.text === 'string' ? req.text.trim().slice(0, 4000) : '';
     if (!text || !sid(req.to)) return { status: 400, body: { error: 'text와 to(세션)가 필요합니다.' } };
-    const d = { id: store.nextId++, to: req.to, text, label: cleanLabel(req.label), device: req.device === 'mobile' ? 'mobile' : req.device === 'desktop' ? 'desktop' : null, context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString(), ...(req.hold === true ? { hold: true } : {}) };
+    const d = { id: store.nextId++, to: req.to, text, label: cleanLabel(req.label), device: req.device === 'mobile' ? 'mobile' : req.device === 'desktop' ? 'desktop' : null, context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString(), ...(req.hold === true ? { hold: true } : {}), ...(Number.isInteger(req.fromMsg) ? { fromMsg: req.fromMsg } : {}) };
     store.drafts.push(d);
     writeDrafts(store);
     return { status: 200, body: d };
@@ -575,7 +575,7 @@ function handleDrafts(req) {
   if (req.action === 'send') {
     if (!ids.length) return { status: 400, body: { error: '보낼 항목(ids)이 필요합니다.' } };
     const device = req.device === 'mobile' || req.device === 'desktop' ? req.device : null;
-    if (req.plain === true) return { status: 200, body: { sent: sendPlain(ids, device) } };
+    if (req.plain === true) return { status: 200, body: { sent: sendPlain(ids, device, req.interject === true) } };
     return { status: 200, body: { sent: sendDrafts(ids, req.combine !== false, device) } };
   }
   return { status: 400, body: { error: 'action은 add·update·delete·restore·send 중 하나입니다.' } };
