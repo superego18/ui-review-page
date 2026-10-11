@@ -731,6 +731,8 @@ const server = http.createServer((req, res) => {
   }
 
   // 알림(웹 푸시): 공개 키 주기, 기기 구독 받기·빼기, 시험 보내기
+  // 대화창 위젯 파일이 바뀌었는지(고친 시각). 홈 화면 앱처럼 새로고침이 없는 곳에서 새 버전을 알려 주는 데 쓴다.
+  if (url.pathname === '/api/widget-version') return send(res, 200, { v: fs.statSync(path.join(assetsDir, 'app-widget.js')).mtimeMs });
   if (url.pathname === '/api/push-key') return send(res, 200, { publicKey: vapidKeys(root).publicKey });
   if ((url.pathname === '/api/push-subscribe' || url.pathname === '/api/push-unsubscribe' || url.pathname === '/api/push-test' || url.pathname === '/api/push-prefs' || url.pathname === '/api/push-viewing') && req.method === 'POST') {
     let body = '';
