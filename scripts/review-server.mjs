@@ -146,8 +146,46 @@ function cleanWhere(w) {
 }
 
 // 대화 기록에 메시지를 더하고, Codex 세션에게 온 사용자 메시지는 그 세션에 바로 넣는다.
+// ── 세션끼리 주고받은 메시지 ──
+// 보낸 세션의 훅이 보낼 때(PreToolUse SendMessage) 한 번, 받은 세션의 훅이 받을 때(UserPromptSubmit) 한 번 알려 온다.
+// SendMessage 는 받는 쪽을 세션 이름(peer 이름)으로 부르고, 그 이름은 대화창 탭 이름과 다르다.
+// 받은 쪽이 같은 글을 알려 오면 그 이름이 어느 세션인지 배워 peers.json 에 적어 두고, 다음부터는 보낼 때 바로 찾는다.
+const peersFile = path.join(root, 'peers.json');
+const peerName = (v) => (typeof v === 'string' ? v.replace(/\s*\[[^\]]*\]\s*$/, '').trim().slice(0, 80) : '');
+function readPeers() {
+  try { return JSON.parse(fs.readFileSync(peersFile, 'utf8')); } catch { return {}; }
+}
+function addPeer(msg, text) {
+  const chat = readChat();
+  const peers = readPeers();
+  const now = new Date().toISOString();
+  if (sid(msg.to)) {
+    // 받은 쪽: 10분 안에 같은 글을 보낸 기록이 있으면 그 기록에 받은 세션과 받은 시각을 적는다.
+    const sent = chat.messages.findLast((m) => m.from === 'peer' && !m.readAt && m.text === text && Date.now() - Date.parse(m.at) < 10 * 60_000 && (!m.to || m.to === msg.to));
+    const fromName = peerName(msg.fromName);
+    if (sent) {
+      sent.to = msg.to;
+      sent.readAt = now;
+      if (sent.toName) peers[sent.toName] = msg.to;
+      if (fromName && sent.session) peers[fromName] = sent.session;
+      fs.writeFileSync(peersFile, JSON.stringify(peers, null, 2) + '\n');
+    } else {
+      chat.messages.push({ id: chat.messages.length + 1, from: 'peer', text, at: now, to: msg.to, readAt: now, ...(fromName ? { fromName } : {}), ...(peers[fromName] ? { session: peers[fromName] } : {}) });
+    }
+  } else {
+    const toName = peerName(msg.toName);
+    const entry = { id: chat.messages.length + 1, from: 'peer', text, at: now, toName };
+    if (sid(msg.session)) entry.session = msg.session;
+    if (peers[toName]) entry.to = peers[toName];
+    chat.messages.push(entry);
+  }
+  fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
+  return chat.messages.at(-1);
+}
+
 function addChat(msg) {
   const text = typeof msg.text === 'string' ? msg.text.trim().slice(0, 12000) : '';
+  if (text && msg.from === 'peer') return addPeer(msg, text);
   if (!text || !['user', 'agent'].includes(msg.from)) return null;
   const chat = readChat();
   const entry = { id: chat.messages.length + 1, from: msg.from, text, round: Number(msg.round) || null, at: new Date().toISOString() };
@@ -510,7 +548,9 @@ const server = http.createServer((req, res) => {
       try {
         const s = JSON.parse(body);
         if (!/^[\w.-]{1,80}$/.test(String(s.session)) || !['working', 'permission', 'idle'].includes(s.state)) throw new Error();
-        fs.writeFileSync(path.join(root, `status-${s.session}.json`), JSON.stringify({ state: s.state, detail: String(s.detail || '').slice(0, 120), at: new Date().toISOString() }) + '\n');
+        // 다른 세션에 메시지를 보내는 중이면(peer) 받는 세션을 함께 적어, 대화창이 세션 탭 사이에 화살표를 그린다.
+        const to = s.peer ? readPeers()[peerName(s.peer)] : undefined;
+        fs.writeFileSync(path.join(root, `status-${s.session}.json`), JSON.stringify({ state: s.state, detail: String(s.detail || '').slice(0, 120), at: new Date().toISOString(), ...(s.peer ? { peer: peerName(s.peer) } : {}), ...(to ? { peerTo: to } : {}) }) + '\n');
         send(res, 200, { ok: true });
       } catch {
         send(res, 400, { error: 'session, state(working|permission|idle)가 필요합니다.' });
@@ -647,7 +687,7 @@ const server = http.createServer((req, res) => {
           return send(res, 400, { error: 'JSON 형식이 아닙니다.' });
         }
         const entry = addChat(msg);
-        if (!entry) return send(res, 400, { error: 'from(user|agent)과 text가 필요합니다.' });
+        if (!entry) return send(res, 400, { error: 'from(user|agent|peer)과 text가 필요합니다.' });
         send(res, 200, entry);
       });
       return;
