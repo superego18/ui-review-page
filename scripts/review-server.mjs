@@ -767,7 +767,7 @@ const server = http.createServer((req, res) => {
         return send(res, 200, { prefs: prefsOf(me) });
       }
       if (url.pathname === '/api/push-viewing') {
-        if (me) { me.viewingAt = new Date().toISOString(); writeSubs(subs); }
+        if (me) { if (b.off === true) delete me.viewingAt; else me.viewingAt = new Date().toISOString(); writeSubs(subs); }
         return send(res, 200, { ok: true });
       }
       const rest = subs.filter((s) => s.endpoint !== ep);
