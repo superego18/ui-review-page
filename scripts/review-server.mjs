@@ -172,7 +172,7 @@ async function pushAll(data, kind, skip) {
     if (skip && skip(p)) return false;
     return p[kind] && !(p.quiet && s.viewingAt && Date.now() - Date.parse(s.viewingAt) < 30_000);
   });
-  if (!subs.length) return 0;
+  if (!subs.length) { console.log(`[알림] ${new Date().toLocaleTimeString('ko-KR')} ${kind || 'test'} → 보낼 기기 없음(꺼짐·보는 중) · ${data.title}`); return 0; }
   const keys = vapidKeys(root);
   let sent = 0;
   const gone = new Set();
@@ -184,6 +184,7 @@ async function pushAll(data, kind, skip) {
     } catch {}
   }));
   if (gone.size) writeSubs(readSubs().filter((s) => !gone.has(s.endpoint)));
+  console.log(`[알림] ${new Date().toLocaleTimeString('ko-KR')} ${kind || 'test'} → ${sent}대 · ${data.title}`); // 알림이 몇 번 갔는지 서버 출력으로 확인한다
   return sent;
 }
 
