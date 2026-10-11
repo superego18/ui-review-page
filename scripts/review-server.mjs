@@ -15,6 +15,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { lanAuth } from './lan-auth.mjs';
 import { vapidKeys, sendPush } from './web-push.mjs';
+import { readJsonSafe, writeJsonAtomic } from './chat-format.mjs';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -271,7 +272,7 @@ function addPeer(msg, text) {
     if (peers[toName]) entry.to = peers[toName];
     chat.messages.push(entry);
   }
-  fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
+  writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
   const last = chat.messages.at(-1);
   if (!sid(msg.to)) pushAll({ title: `${findSession(last.session)?.name || '세션'} → ${last.to ? findSession(last.to)?.name || last.toName : last.toName}`, body: plainBody(text), tag: 'uifb-peer' }, 'peer');
   return last;
@@ -334,7 +335,7 @@ function addChat(msg) {
   if (msg.interject === true && entry.from === 'user') entry.interject = true;
   if (Number.isInteger(msg.resendOf) && msg.resendOf > 0 && msg.resendOf < entry.id) entry.resendOf = msg.resendOf;
   chat.messages.push(entry);
-  fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
+  writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
   const target = entry.from === 'user' && entry.to ? findSession(entry.to) : null;
   if (target?.tool === 'codex' && !msg.noQueue) { queueToCodex(target, entry); markDelivered(target.sessionId, entry.id); } // noQueue: 서버가 따로 넣는 글(리뷰 완료)이 있어 두 번 넣지 않는다
   // 사용자가 터미널이나 화면에서 그 세션에 말을 걸었다면 그때까지의 답은 읽은 것이다.
@@ -353,12 +354,15 @@ function addChat(msg) {
 // 세션마다 사용자가 마지막으로 읽은 답의 시각. 앱 화면(4798)과 리뷰 페이지(4799)는 주소가 달라 브라우저 저장소를 함께 못 쓰므로 서버에 둔다.
 // 세션이 받아 간 마지막 메시지 번호. Claude 는 대화 감시(wait-review)가 메시지를 넘길 때, Codex 는 codex queue 에 넣을 때 적는다.
 const deliveredFile = path.join(root, 'delivered.json');
+let lastDelivered = {};
 function readDelivered() {
-  try { return JSON.parse(fs.readFileSync(deliveredFile, 'utf8')); } catch { return {}; }
+  const d = readJsonSafe(deliveredFile);
+  if (d) lastDelivered = d; // 다른 쪽이 쓰는 중이라 못 읽으면 마지막으로 읽은 기록을 쓴다(빈 기록을 대화창에 보내지 않게)
+  return d || lastDelivered;
 }
 function markDelivered(id, msgId) {
-  const d = readDelivered();
-  if (!(d[id] >= msgId)) fs.writeFileSync(deliveredFile, JSON.stringify({ ...d, [id]: msgId, _at: { ...(d._at || {}), [msgId]: new Date().toISOString() } }, null, 2) + '\n');
+  const d = readJsonSafe(deliveredFile);
+  if (d && !(d[id] >= msgId)) writeJsonAtomic(deliveredFile, { ...d, [id]: msgId, _at: { ...(d._at || {}), [msgId]: new Date().toISOString() } });
 }
 
 const seenFile = path.join(root, 'seen.json');
@@ -950,7 +954,7 @@ const server = http.createServer((req, res) => {
       if (!m || m.from !== 'user' || !m.to || m.context === 'terminal') return send(res, 400, { error: '취소할 수 없는 메시지입니다.' });
       if (m.id <= (d[m.to] || 0) || d._at?.[m.id] || findSession(m.to)?.tool === 'codex') return send(res, 409, { error: '세션이 이미 받아 가서 취소할 수 없습니다.' });
       m.cancelled = new Date().toISOString();
-      fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
+      writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
       send(res, 200, { ok: true });
     });
     return;
@@ -973,7 +977,7 @@ const server = http.createServer((req, res) => {
       if (d._at?.[m.id] || findSession(m.to)?.tool === 'codex') return send(res, 409, { error: '세션이 이미 받아 갔습니다.' });
       if (on === true) m.interject = true;
       else delete m.interject;
-      fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
+      writeJsonAtomic(chatFile, chat); // 한 번에 바꿔 다른 쪽이 반쯤 쓴 파일을 읽지 않게
       send(res, 200, { ok: true });
     });
     return;
