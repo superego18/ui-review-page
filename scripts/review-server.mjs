@@ -218,7 +218,10 @@ function addChat(msg) {
   if (msg.device === 'mobile' || msg.device === 'desktop') entry.device = msg.device;
   if (cleanWhere(msg.where)) entry.where = cleanWhere(msg.where);
   if (draft) entry.draft = draft;
-  if (Number.isInteger(msg.replyTo) && msg.replyTo > 0 && msg.replyTo < entry.id) entry.replyTo = msg.replyTo;
+  if (Number.isInteger(msg.replyTo) && msg.replyTo > 0 && msg.replyTo < entry.id) {
+    entry.replyTo = msg.replyTo;
+    if (typeof msg.replyQuote === 'string' && msg.replyQuote.trim()) entry.replyQuote = msg.replyQuote.trim().slice(0, 500); // 원문 중 사용자가 고른 부분만 인용
+  }
   if (msg.interject === true && entry.from === 'user') entry.interject = true;
   if (Number.isInteger(msg.resendOf) && msg.resendOf > 0 && msg.resendOf < entry.id) entry.resendOf = msg.resendOf;
   chat.messages.push(entry);
