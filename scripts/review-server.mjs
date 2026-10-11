@@ -307,6 +307,7 @@ function addChat(msg) {
   if (draft) entry.draft = draft;
   if (Number.isInteger(msg.replyTo) && msg.replyTo > 0 && msg.replyTo < entry.id) {
     entry.replyTo = msg.replyTo;
+    if (msg.refer === true) entry.refer = true; // 답장이 아니라 참고로만 붙인 인용
     if (typeof msg.replyQuote === 'string' && msg.replyQuote.trim()) entry.replyQuote = msg.replyQuote.trim().slice(0, 500); // 원문 중 사용자가 고른 부분만 인용
   }
   if (msg.interject === true && entry.from === 'user') entry.interject = true;
