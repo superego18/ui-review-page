@@ -748,6 +748,29 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 이미 보낸(아직 안 받아 간) 메시지를 끼워넣기로 바꾸거나 끼워넣기를 취소한다.
+  if (url.pathname === '/api/chat-interject' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_BODY) req.destroy();
+    });
+    req.on('end', () => {
+      let id, on;
+      try { ({ id, on } = JSON.parse(body)); } catch {}
+      const chat = readChat();
+      const m = chat.messages.find((x) => x.id === Number(id));
+      const d = readDelivered();
+      if (!m || m.from !== 'user' || !m.to || m.cancelled || m.context === 'terminal') return send(res, 400, { error: '바꿀 수 없는 메시지입니다.' });
+      if (d._at?.[m.id] || findSession(m.to)?.tool === 'codex') return send(res, 409, { error: '세션이 이미 받아 갔습니다.' });
+      if (on === true) m.interject = true;
+      else delete m.interject;
+      fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
+      send(res, 200, { ok: true });
+    });
+    return;
+  }
+
   if (url.pathname === '/api/chat') {
     if (req.method === 'GET') return send(res, 200, { ...readChat(), delivered: readDelivered() });
     if (req.method === 'POST') {
