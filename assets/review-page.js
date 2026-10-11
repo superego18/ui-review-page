@@ -344,14 +344,36 @@ function render() {
       w.className = 'nomobile'; w.textContent = '모바일(390px) 캡처가 없습니다';
       shots.before(w);
     }
+    // 데스크톱은 데스크톱끼리, 모바일은 모바일끼리 한 줄에 안(전·후 등)을 나란히 놓는다. 창 크기를 모르는 이미지는 데스크톱 줄에 둔다.
+    const rows = { desktop: [], mobile: [] };
     for (const o of optionsOf(it)) {
-      const figs = [...(o.demo ? [demoFrame(o)] : []), ...(o.shots || []).map((f) => shot(f, o.label, o.tone || 'after', it.id, texts))];
+      const figs = o.demo ? [demoFrame(o)] : [];
+      rows.desktop.push(...figs);
+      for (const x of o.shots || []) {
+        const f = shot(x, o.label, o.tone || 'after', it.id, texts);
+        figs.push(f);
+        rows[parseInt(imgOf(x).source?.viewport, 10) < 768 ? 'mobile' : 'desktop'].push(f);
+      }
       if (o.note && figs[0]) {
         const p = document.createElement('p');
         p.className = 'optnote'; p.textContent = o.note;
         figs[0].insertBefore(p, figs[0].children[1]);
       }
-      shots.append(...figs);
+    }
+    for (const [kind, figs] of Object.entries(rows)) {
+      if (!figs.length) continue;
+      const row = document.createElement('div');
+      row.className = 'shotrow ' + kind;
+      if (rows.desktop.length && rows.mobile.length) {
+        const h = document.createElement('p');
+        h.className = 'rowlabel'; h.textContent = kind === 'mobile' ? '모바일' : '데스크톱';
+        row.append(h);
+      }
+      const grid = document.createElement('div');
+      grid.className = 'shotgrid';
+      grid.append(...figs);
+      row.append(grid);
+      shots.append(row);
     }
     const v = sec.querySelector('.verdict');
     for (const key of choicesOf(it)) {
