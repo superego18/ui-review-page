@@ -124,7 +124,18 @@ function liveFrame(live, marks) {
     if (wrap.querySelector('iframe')) return;
     const frame = document.createElement('iframe');
     frame.src = live.file; frame.title = '움직이는 조각';
+    frame.setAttribute('scrolling', 'no');
     Object.assign(frame.style, { width: live.vw + 'px', height: live.h + 'px' });
+    // 조각 안이 스크롤되면 내용만 움직이고 번호 상자는 그대로라 어긋난다. 찍을 때 위치에 고정하고 스크롤바도 없앤다.
+    frame.onload = () => {
+      const doc = frame.contentDocument;
+      if (!doc) return;
+      const y = frame.contentWindow.scrollY;
+      const st = doc.createElement('style');
+      st.textContent = 'html,body{overflow:hidden!important;scrollbar-width:none}::-webkit-scrollbar{display:none}';
+      doc.head.append(st);
+      frame.contentWindow.scrollTo(0, y);
+    };
     wrap.prepend(frame);
     const fit = () => { frame.style.transform = `scale(${wrap.clientWidth / live.w})`; };
     new ResizeObserver(fit).observe(wrap);
@@ -157,6 +168,9 @@ function shot(image, label, tone, itemId, texts) {
   if (live) {
     f.classList.add('haslive');
     f.append(liveFrame(live, marks));
+    const open = document.createElement('a');
+    open.href = live.file; open.target = '_blank'; open.className = 'liveopen'; open.textContent = '실제 크기로 열기';
+    cap.append(open);
   }
   const src = sourceLine(source);
   if (src) f.append(src);

@@ -35,7 +35,12 @@ header p { color: var(--ink-2); margin: 0; line-height: 1.6; }
 .item:not(.live) .livewrap, .item.live figure.haslive > button { display: none; }
 .livetoggle { display: flex; gap: 4px; }
 .livetoggle button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; }
-.item:not(.live) .livetoggle .replay { display: none; }
+.item:not(.live) .livetoggle .replay, .item:not(.live) .liveopen { display: none; }
+.liveopen { margin-left: auto; font-size: 12px; }
+/* 움직여 볼 때 데스크톱 조각은 칸을 나누지 않고 전·후를 위아래로 크게 놓는다(줄이면 확인할 수 없을 만큼 작아서). */
+.item.live .shotrow.desktop .shotgrid { grid-template-columns: minmax(0, 1fr); }
+.item.live .shotrow.desktop figure { grid-column: 1 !important; }
+.item.live .shots .divider { display: none; }
 .livetoggle .replay { margin-left: 4px; }
 .livetoggle button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .shots .divider { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); pointer-events: none; }
