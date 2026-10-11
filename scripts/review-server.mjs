@@ -212,6 +212,14 @@ function addChat(msg) {
   const chat = readChat();
   const entry = { id: chat.messages.length + 1, from: msg.from, text, round: Number(msg.round) || null, at: new Date().toISOString() };
   if (msg.from === 'agent' && typeof msg.agent === 'string') entry.agent = msg.agent.slice(0, 40);
+  // 세션 답 맨 앞의 <re 1090 1091>: 이 답이 어느 메시지에 대한 답인지. 글에서는 떼어 내고 re 로 남긴다(대화창이 연결선으로 잇는다).
+  if (msg.from === 'agent') {
+    const mk = /^\s*<re\s+([#\d,\s]+)>\s*/.exec(text);
+    if (mk) {
+      entry.re = [...new Set(mk[1].match(/\d+/g).map(Number))].filter((n) => n < entry.id).slice(0, 50);
+      entry.text = text.slice(mk[0].length) || text;
+    }
+  }
   // 사용자 메시지는 받을 세션(to), 에이전트 답과 터미널 입력은 그 세션(session)을 적는다.
   if (sid(msg.to)) entry.to = msg.to;
   if (sid(msg.session)) entry.session = msg.session;
