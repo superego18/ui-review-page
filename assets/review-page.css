@@ -35,6 +35,8 @@ header p { color: var(--ink-2); margin: 0; line-height: 1.6; }
 .item:not(.live) .livewrap, .item.live figure.haslive > button { display: none; }
 .livetoggle { display: flex; gap: 4px; }
 .livetoggle button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; }
+.item:not(.live) .livetoggle .replay { display: none; }
+.livetoggle .replay { margin-left: 4px; }
 .livetoggle button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .shots .divider { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); pointer-events: none; }
 .shotrow > .marklegend { position: relative; background: var(--sheet); padding: 4px 0; }

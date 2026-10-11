@@ -430,6 +430,11 @@ function render() {
         };
         tg.append(b);
       }
+      // 등장 애니메이션은 한 번 지나가면 다시 볼 수 없으므로, 전·후 조각을 함께 처음부터 다시 띄운다.
+      const replay = document.createElement('button');
+      replay.type = 'button'; replay.className = 'replay'; replay.textContent = '↻ 다시 재생';
+      replay.onclick = () => shots.querySelectorAll('.livewrap iframe').forEach((f) => f.contentWindow.location.reload());
+      tg.append(replay);
       shots.before(tg);
     }
     const v = sec.querySelector('.verdict');
