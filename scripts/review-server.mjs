@@ -161,7 +161,7 @@ function writeSubs(list) {
 }
 // 기기마다 고른 알림 종류. answer 세션 답장, done 작업 끝남, permission 승인 필요, review 비교 페이지 준비, stale 오래 멈춤, peer 세션끼리 메시지.
 // quiet: 그 기기에서 대화창을 보고 있는 동안(최근 30초 안에 보고 있다고 알려 옴)에는 보내지 않는다.
-const PUSH_DEFAULTS = { answer: true, done: true, permission: true, review: true, stale: true, peer: false, quiet: true };
+const PUSH_DEFAULTS = { answer: true, done: true, permission: true, review: true, stale: true, peer: false, work: true, quiet: true };
 const prefsOf = (s) => ({ ...PUSH_DEFAULTS, ...(s.prefs || {}) });
 // 구독한 기기 중 kind 를 켠 기기에 보낸다(kind 가 없으면 모두, 시험용). 끝난 구독(404·410)은 지운다. 보낸 수를 돌려준다(실패해도 대화 기록은 막지 않는다).
 // 대화창 새로고침 번호(/api/reload-widgets). 파일에 남겨, 서버를 다시 띄워도 번호가 바뀌어 대화창이 저절로 새로고침되지 않게 한다.
@@ -173,7 +173,10 @@ async function pushAll(data, kind, skip) {
     if (!kind) return true;
     const p = prefsOf(s);
     if (skip && skip(p)) return false;
-    return p[kind] && !(p.quiet && s.viewingAt && Date.now() - Date.parse(s.viewingAt) < 30_000);
+    const viewing = s.viewingAt && Date.now() - Date.parse(s.viewingAt) < 30_000;
+    // 다른 세션 작업 중: 대화창을 보고 있는 기기 중 그 세션이 아닌 탭을 보는 기기에만 조용히 보낸다.
+    if (kind === 'work') return p.work && viewing && s.viewingTab !== data.session;
+    return p[kind] && !(p.quiet && viewing);
   });
   if (!subs.length) { console.log(`[알림] ${new Date().toLocaleTimeString('ko-KR')} ${kind || 'test'} → 보낼 기기 없음(꺼짐·보는 중) · ${data.title}`); return 0; }
   const keys = vapidKeys(root);
@@ -192,8 +195,14 @@ async function pushAll(data, kind, skip) {
 }
 
 // 상태가 바뀔 때의 알림: 작업 끝남(작업 중 → 쉬는 중), 승인 필요(→ 승인 대기).
+const workPushedAt = {}; // 세션마다 마지막으로 "작업 중" 알림을 보낸 시각(20초에 한 번까지만)
 function notifyStatus(s, prev) {
   const name = findSession(s.session)?.name || '세션';
+  // 다른 세션이 하는 일이 바뀌면 그 탭을 보고 있지 않은 기기에 조용히 알린다(같은 알림을 바꿔 끼워 쌓이지 않게).
+  if (s.state === 'working' && s.detail && s.detail !== prev.detail && Date.now() - (workPushedAt[s.session] || 0) > 20_000) {
+    workPushedAt[s.session] = Date.now();
+    pushAll({ title: `${name} 작업 중`, body: String(s.detail).slice(0, 120), tag: `uifb-work-${s.session}`, silent: true, session: s.session }, 'work');
+  }
   const busy = (x) => x === 'working' || x === 'permission';
   if (s.state === 'permission' && prev.state !== 'permission') pushAll({ title: `${name} 승인 필요`, body: s.detail || '터미널에서 승인을 기다리는 중', tag: `uifb-perm-${s.session}` }, 'permission');
   if (s.state === 'idle' && busy(prev.state)) {
@@ -780,7 +789,7 @@ const server = http.createServer((req, res) => {
         return send(res, 200, { prefs: prefsOf(me) });
       }
       if (url.pathname === '/api/push-viewing') {
-        if (me) { if (b.off === true) delete me.viewingAt; else me.viewingAt = new Date().toISOString(); writeSubs(subs); }
+        if (me) { if (b.off === true) delete me.viewingAt; else { me.viewingAt = new Date().toISOString(); me.viewingTab = sid(b.tab) ? b.tab : null; } writeSubs(subs); }
         return send(res, 200, { ok: true });
       }
       const rest = subs.filter((s) => s.endpoint !== ep);
