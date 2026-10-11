@@ -164,6 +164,9 @@ function writeSubs(list) {
 const PUSH_DEFAULTS = { answer: true, done: true, permission: true, review: true, stale: true, peer: false, quiet: true };
 const prefsOf = (s) => ({ ...PUSH_DEFAULTS, ...(s.prefs || {}) });
 // 구독한 기기 중 kind 를 켠 기기에 보낸다(kind 가 없으면 모두, 시험용). 끝난 구독(404·410)은 지운다. 보낸 수를 돌려준다(실패해도 대화 기록은 막지 않는다).
+// 대화창 새로고침 번호(/api/reload-widgets). 파일에 남겨, 서버를 다시 띄워도 번호가 바뀌어 대화창이 저절로 새로고침되지 않게 한다.
+const reloadFile = path.join(root, 'reload.json');
+let reloadToken = (() => { try { return JSON.parse(fs.readFileSync(reloadFile, 'utf8')).r || 0; } catch { return 0; } })();
 const answerPushed = new Set(); // 답장 알림으로 이미 알린 세션 답 번호(작업 끝 알림이 같은 글로 한 번 더 가지 않게)
 async function pushAll(data, kind, skip) {
   const subs = readSubs().filter((s) => {
@@ -746,7 +749,9 @@ const server = http.createServer((req, res) => {
 
   // 알림(웹 푸시): 공개 키 주기, 기기 구독 받기·빼기, 시험 보내기
   // 대화창 위젯 파일이 바뀌었는지(고친 시각). 홈 화면 앱처럼 새로고침이 없는 곳에서 새 버전을 알려 주는 데 쓴다.
-  if (url.pathname === '/api/widget-version') return send(res, 200, { v: fs.statSync(path.join(assetsDir, 'app-widget.js')).mtimeMs });
+  // r: 대화창 새로고침 번호. 세션이 위젯을 고친 뒤 원할 때 POST /api/reload-widgets 로 바꾸면, 열려 있는 대화창이 안내를 띄우고 새로고침한다.
+  if (url.pathname === '/api/widget-version') return send(res, 200, { v: fs.statSync(path.join(assetsDir, 'app-widget.js')).mtimeMs, r: reloadToken });
+  if (url.pathname === '/api/reload-widgets' && req.method === 'POST') { reloadToken = Date.now(); fs.writeFileSync(reloadFile, JSON.stringify({ r: reloadToken })); return send(res, 200, { ok: true, r: reloadToken }); }
   if (url.pathname === '/api/push-key') return send(res, 200, { publicKey: vapidKeys(root).publicKey });
   if ((url.pathname === '/api/push-subscribe' || url.pathname === '/api/push-unsubscribe' || url.pathname === '/api/push-test' || url.pathname === '/api/push-prefs' || url.pathname === '/api/push-viewing') && req.method === 'POST') {
     let body = '';
