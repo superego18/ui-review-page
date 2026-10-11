@@ -811,6 +811,24 @@ const server = http.createServer((req, res) => {
     return send(res, 405, { error: 'GET 또는 POST만 됩니다.' });
   }
 
+  // 진단 기록: 폰에서만 생기는 문제(초점이 엉뚱한 곳으로 가는 등)를 원인까지 보려고, 위젯이 그 순간 전후의 터치·초점 순서를 남긴다.
+  if (url.pathname === '/api/diag' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_BODY) req.destroy();
+    });
+    req.on('end', () => {
+      try {
+        const file = path.join(root, 'diag.jsonl');
+        if (!fs.existsSync(file) || fs.statSync(file).size < 500_000) fs.appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), ...JSON.parse(body) }) + '\n');
+        send(res, 200, { ok: true });
+      } catch {
+        send(res, 400, { error: 'JSON 형식이 아닙니다.' });
+      }
+    });
+    return;
+  }
   if (url.pathname === '/api/compose') {
     if (req.method === 'GET') return send(res, 200, readCompose());
     if (req.method === 'POST') {
