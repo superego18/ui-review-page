@@ -674,6 +674,28 @@ const server = http.createServer((req, res) => {
     return send(res, 405, { error: 'GET 또는 POST만 됩니다.' });
   }
 
+  // 보내기 취소: 세션이 아직 받아 가지 않은 내 메시지만 취소된다(받아 간 뒤에는 되돌릴 수 없다).
+  if (url.pathname === '/api/chat-cancel' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_BODY) req.destroy();
+    });
+    req.on('end', () => {
+      let id;
+      try { id = Number(JSON.parse(body).id); } catch {}
+      const chat = readChat();
+      const m = chat.messages.find((x) => x.id === id);
+      const d = readDelivered();
+      if (!m || m.from !== 'user' || !m.to || m.context === 'terminal') return send(res, 400, { error: '취소할 수 없는 메시지입니다.' });
+      if (m.id <= (d[m.to] || 0) || d._at?.[m.id] || findSession(m.to)?.tool === 'codex') return send(res, 409, { error: '세션이 이미 받아 가서 취소할 수 없습니다.' });
+      m.cancelled = new Date().toISOString();
+      fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
+      send(res, 200, { ok: true });
+    });
+    return;
+  }
+
   if (url.pathname === '/api/chat') {
     if (req.method === 'GET') return send(res, 200, { ...readChat(), delivered: readDelivered() });
     if (req.method === 'POST') {
