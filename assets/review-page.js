@@ -134,8 +134,6 @@ function shot(image, label, tone, itemId, texts) {
   btn.append(wrap);
   btn.onclick = () => openZoom(itemId, file, marks, texts);
   f.append(cap, btn);
-  const legend = markLegend(marks, texts);
-  if (legend) f.append(legend);
   const src = sourceLine(source);
   if (src) f.append(src);
   return f;
@@ -346,6 +344,7 @@ function render() {
     }
     // 데스크톱은 데스크톱끼리, 모바일은 모바일끼리 한 줄에 안(전·후 등)을 나란히 놓는다. 창 크기를 모르는 이미지는 데스크톱 줄에 둔다.
     const rows = { desktop: [], mobile: [] };
+    const rowMarks = { desktop: [], mobile: [] };
     for (const o of optionsOf(it)) {
       const figs = o.demo ? [demoFrame(o)] : [];
       figs.forEach((f) => { f.style.gridColumn = optionsOf(it).indexOf(o) + 1; });
@@ -354,7 +353,9 @@ function render() {
         const f = shot(x, o.label, o.tone || 'after', it.id, texts);
         f.style.gridColumn = optionsOf(it).indexOf(o) + 1;
         figs.push(f);
-        rows[parseInt(imgOf(x).source?.viewport, 10) < 768 ? 'mobile' : 'desktop'].push(f);
+        const kind = parseInt(imgOf(x).source?.viewport, 10) < 768 ? 'mobile' : 'desktop';
+        rows[kind].push(f);
+        rowMarks[kind].push(...(imgOf(x).marks || []));
       }
       if (o.note && figs[0]) {
         const p = document.createElement('p');
@@ -371,6 +372,7 @@ function render() {
       line.style.left = `calc((100% + var(--colgap)) * ${k / cols} - var(--colgap) / 2)`;
       shots.append(line);
     }
+    const explained = new Set();
     for (const [kind, figs] of Object.entries(rows)) {
       if (!figs.length) continue;
       const row = document.createElement('div');
@@ -384,6 +386,10 @@ function render() {
       grid.className = 'shotgrid';
       grid.append(...figs);
       row.append(grid);
+      // 같은 번호의 설명은 전·후 이미지마다 되풀이하지 않고 줄 아래에 한 번만 쓴다. 앞 줄에서 쓴 번호는 다시 쓰지 않는다.
+      const legend = markLegend(rowMarks[kind].filter((m) => !explained.has(String(m.n))), texts);
+      if (legend) row.append(legend);
+      rowMarks[kind].forEach((m) => explained.add(String(m.n)));
       shots.append(row);
     }
     const v = sec.querySelector('.verdict');

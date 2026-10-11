@@ -31,6 +31,7 @@ header p { color: var(--ink-2); margin: 0; line-height: 1.6; }
 .shotgrid { display: grid; gap: 12px var(--colgap); align-items: start; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); }
 .shotrow.mobile figure { max-width: 300px; }
 .shots .divider { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); pointer-events: none; }
+.shotrow > .marklegend { position: relative; background: var(--sheet); padding: 4px 0; }
 figure { margin: 0; min-width: 0; display: grid; gap: 6px; }
 figcaption { font-size: 12px; color: var(--ink-3); display: flex; gap: 6px; align-items: center; }
 figcaption b { font-weight: 600; font-size: 11px; padding: 1px 6px; border-radius: 4px; }
