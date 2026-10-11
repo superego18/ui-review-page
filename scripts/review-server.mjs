@@ -145,7 +145,6 @@ function cleanWhere(w) {
   return { url: str(w.url, 300), selector: str(w.selector, 300), text: str(w.text, 120), rect: num(w.rect), viewport: num(w.viewport) };
 }
 
-// 대화 기록에 메시지를 더하고, Codex 세션에게 온 사용자 메시지는 그 세션에 바로 넣는다.
 // ── 세션끼리 주고받은 메시지 ──
 // 보낸 세션의 훅이 보낼 때(PreToolUse SendMessage) 한 번, 받은 세션의 훅이 받을 때(UserPromptSubmit) 한 번 알려 온다.
 // SendMessage 는 받는 쪽을 세션 이름(peer 이름)으로 부르고, 그 이름은 대화창 탭 이름과 다르다.
@@ -183,8 +182,30 @@ function addPeer(msg, text) {
   return chat.messages.at(-1);
 }
 
+// 보관함에서 보낸 메시지의 구조(분류, 항목마다 글·위치·저장 시각·커밋·담은 화면). 대화창이 사용자가 쓴 글과 위치 같은 덧붙인 정보를 나눠 보이고,
+// 다시 보내기에서 글만 고치게 한다. 세션에 가는 글(text)은 이 구조로 만든다.
+function cleanDraft(v) {
+  if (!v || typeof v !== 'object' || !Array.isArray(v.items) || !v.items.length) return undefined;
+  const items = v.items.slice(0, 50).map((d) => ({
+    text: typeof d?.text === 'string' ? d.text.trim().slice(0, 4000) : '',
+    where: cleanWhere(d?.where),
+    at: typeof d?.at === 'string' && !Number.isNaN(Date.parse(d.at)) ? d.at : null,
+    commit: typeof d?.commit === 'string' && /^[0-9a-f]{4,40}$/.test(d.commit) ? d.commit : null,
+    round: Number(d?.round) || null,
+    device: d?.device === 'mobile' || d?.device === 'desktop' ? d.device : null,
+  })).filter((d) => d.text);
+  return items.length ? { label: cleanLabel(v.label) || '미분류', items } : undefined;
+}
+function draftMessageText(draft) {
+  const { label, items } = draft;
+  if (items.length > 1) return `[${label}] 보관함에서 모아 보낸 ${items.length}개입니다.\n\n` + items.map((d, i) => `${i + 1}. ${draftText(d).replace(/\n/g, '\n   ')}`).join('\n\n');
+  return `[${label}] ` + draftText(items[0]);
+}
+
+// 대화 기록에 메시지를 더하고, Codex 세션에게 온 사용자 메시지는 그 세션에 바로 넣는다.
 function addChat(msg) {
-  const text = typeof msg.text === 'string' ? msg.text.trim().slice(0, 12000) : '';
+  const draft = msg.from === 'user' ? cleanDraft(msg.draft) : undefined;
+  const text = draft ? draftMessageText(draft) : typeof msg.text === 'string' ? msg.text.trim().slice(0, 12000) : '';
   if (text && msg.from === 'peer') return addPeer(msg, text);
   if (!text || !['user', 'agent'].includes(msg.from)) return null;
   const chat = readChat();
@@ -196,6 +217,7 @@ function addChat(msg) {
   if (typeof msg.context === 'string') entry.context = msg.context.slice(0, 20);
   if (msg.device === 'mobile' || msg.device === 'desktop') entry.device = msg.device;
   if (cleanWhere(msg.where)) entry.where = cleanWhere(msg.where);
+  if (draft) entry.draft = draft;
   if (Number.isInteger(msg.replyTo) && msg.replyTo > 0 && msg.replyTo < entry.id) entry.replyTo = msg.replyTo;
   if (msg.interject === true && entry.from === 'user') entry.interject = true;
   if (Number.isInteger(msg.resendOf) && msg.resendOf > 0 && msg.resendOf < entry.id) entry.resendOf = msg.resendOf;
@@ -374,10 +396,9 @@ function sendDrafts(ids, combine, device) {
     const to = list[0].to;
     const label = list[0].label || '미분류'; // 분류 없이 담은 것도 [미분류]로 붙여 받는 세션이 묶음을 알게 한다
     if (combine && list.length > 1) {
-      const text = `${label ? `[${label}] ` : ''}보관함에서 모아 보낸 ${list.length}개입니다.\n\n` + list.map((d, i) => `${i + 1}. ${draftText(d).replace(/\n/g, '\n   ')}`).join('\n\n');
-      sent.push(addChat({ from: 'user', to, text, device, context: list.every((d) => d.context === 'review') ? 'review' : 'app' }));
+      sent.push(addChat({ from: 'user', to, draft: { label, items: list }, device, context: list.every((d) => d.context === 'review') ? 'review' : 'app' }));
     } else {
-      for (const d of list) sent.push(addChat({ from: 'user', to, text: (label ? `[${label}] ` : '') + draftText(d), context: d.context, round: d.round, where: d.where, device: device || d.device }));
+      for (const d of list) sent.push(addChat({ from: 'user', to, draft: { label, items: [d] }, context: d.context, round: d.round, where: d.where, device: device || d.device }));
     }
   }
   store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
