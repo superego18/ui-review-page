@@ -288,7 +288,11 @@ function addChat(msg) {
   if (text && msg.from === 'peer') return addPeer(msg, text);
   if (!text || !['user', 'agent'].includes(msg.from)) return null;
   const chat = readChat();
+  // 같은 cid 로 다시 온 글(느린 망에서 다시 누름)은 새로 만들지 않고 먼저 받은 것을 돌려준다.
+  const cid = typeof msg.cid === 'string' ? msg.cid.slice(0, 80) : null;
+  if (cid) { const dup = chat.messages.find((x) => x.cid === cid); if (dup) return dup; }
   const entry = { id: chat.messages.length + 1, from: msg.from, text, round: Number(msg.round) || null, at: new Date().toISOString() };
+  if (cid) entry.cid = cid;
   if (msg.from === 'agent' && typeof msg.agent === 'string') entry.agent = msg.agent.slice(0, 40);
   // 세션 답 맨 앞의 <re 1090 1091>: 이 답이 어느 메시지에 대한 답인지. 글에서는 떼어 내고 re 로 남긴다(대화창이 연결선으로 잇는다).
   if (msg.from === 'agent') {
@@ -538,7 +542,10 @@ function handleDrafts(req) {
   if (req.action === 'add') {
     const text = typeof req.text === 'string' ? req.text.trim().slice(0, 4000) : '';
     if (!text || !sid(req.to)) return { status: 400, body: { error: 'text와 to(세션)가 필요합니다.' } };
-    const d = { id: store.nextId++, to: req.to, text, label: cleanLabel(req.label), device: req.device === 'mobile' ? 'mobile' : req.device === 'desktop' ? 'desktop' : null, context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString(), ...(req.hold === true ? { hold: true } : {}), ...(Number.isInteger(req.fromMsg) ? { fromMsg: req.fromMsg } : {}) };
+    const cid = typeof req.cid === 'string' ? req.cid.slice(0, 80) : null;
+    const dup = cid && [...store.drafts, ...store.trash].find((x) => x.cid === cid);
+    if (dup) return { status: 200, body: dup };
+    const d = { id: store.nextId++, to: req.to, text, label: cleanLabel(req.label), device: req.device === 'mobile' ? 'mobile' : req.device === 'desktop' ? 'desktop' : null, context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString(), ...(req.hold === true ? { hold: true } : {}), ...(Number.isInteger(req.fromMsg) ? { fromMsg: req.fromMsg } : {}), ...(cid ? { cid } : {}) };
     store.drafts.push(d);
     writeDrafts(store);
     return { status: 200, body: d };
