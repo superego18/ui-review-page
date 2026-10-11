@@ -204,14 +204,14 @@ function notifyStatus(s, prev) {
     pushAll({ title: `${name} 작업 중`, body: String(s.detail).slice(0, 120), tag: `uifb-work-${s.session}`, silent: true, session: s.session }, 'work');
   }
   const busy = (x) => x === 'working' || x === 'permission';
-  if (s.state === 'permission' && prev.state !== 'permission') pushAll({ title: `${name} 승인 필요`, body: s.detail || '터미널에서 승인을 기다리는 중', tag: `uifb-perm-${s.session}` }, 'permission');
+  if (s.state === 'permission' && prev.state !== 'permission') pushAll({ title: `${name} 승인 필요`, body: s.detail || '터미널에서 승인을 기다리는 중', tag: `uifb-perm-${s.session}`, session: s.session }, 'permission');
   if (s.state === 'idle' && busy(prev.state)) {
     // 마지막 답은 작업이 끝나는 것과 거의 같은 때 기록되므로 잠깐 기다렸다가 그 답을 알림 본문에 담는다.
     setTimeout(() => {
       const last = readChat().messages.filter((m) => m.from === 'agent' && m.session === s.session).at(-1);
       // 마지막 답을 이미 답장 알림으로 보냈으면, 답장 알림을 켠 기기에는 작업 끝 알림을 또 보내지 않는다(같은 글이 두 번 오지 않게).
       const dup = last && answerPushed.has(last.id);
-      pushAll({ title: `${name} 작업 끝`, body: last ? plainBody(last.text) : '하던 일을 마쳤습니다', tag: `uifb-done-${s.session}` }, 'done', dup ? (p) => p.answer : null);
+      pushAll({ title: `${name} 작업 끝`, body: last ? plainBody(last.text) : '하던 일을 마쳤습니다', tag: `uifb-done-${s.session}`, session: s.session }, 'done', dup ? (p) => p.answer : null);
     }, 3000);
   }
 }
@@ -222,7 +222,7 @@ setInterval(() => {
     const st = x.status;
     if (st?.state !== 'working' || !st.at || Date.now() - Date.parse(st.at) < 5 * 60_000 || staleSent.get(x.id) === st.at) continue;
     staleSent.set(x.id, st.at);
-    pushAll({ title: `${x.name} 오래 멈춤`, body: `"${st.detail || '작업 중'}" 상태가 5분 넘게 그대로예요`, tag: `uifb-stale-${x.id}` }, 'stale');
+    pushAll({ title: `${x.name} 오래 멈춤`, body: `"${st.detail || '작업 중'}" 상태가 5분 넘게 그대로예요`, tag: `uifb-stale-${x.id}`, session: x.id }, 'stale');
   }
 }, 60_000).unref();
 // 비교 페이지 준비: .ui-feedback 에 review*.html 이 새로 생기면 알린다.
@@ -342,7 +342,7 @@ function addChat(msg) {
   if (entry.from === 'agent' && entry.session) {
     const name = findSession(entry.session)?.name || '세션';
     answerPushed.add(entry.id);
-    pushAll({ title: `${name} 답장`, body: plainBody(entry.text), tag: `uifb-${entry.session}` }, 'answer');
+    pushAll({ title: `${name} 답장`, body: plainBody(entry.text), tag: `uifb-${entry.session}`, session: entry.session }, 'answer');
   }
   const talkedTo = entry.from === 'user' ? entry.session || entry.to : null;
   if (talkedTo) markSeen({ [talkedTo]: entry.at });
