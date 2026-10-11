@@ -164,10 +164,12 @@ function writeSubs(list) {
 const PUSH_DEFAULTS = { answer: true, done: true, permission: true, review: true, stale: true, peer: false, quiet: true };
 const prefsOf = (s) => ({ ...PUSH_DEFAULTS, ...(s.prefs || {}) });
 // 구독한 기기 중 kind 를 켠 기기에 보낸다(kind 가 없으면 모두, 시험용). 끝난 구독(404·410)은 지운다. 보낸 수를 돌려준다(실패해도 대화 기록은 막지 않는다).
-async function pushAll(data, kind) {
+const answerPushed = new Set(); // 답장 알림으로 이미 알린 세션 답 번호(작업 끝 알림이 같은 글로 한 번 더 가지 않게)
+async function pushAll(data, kind, skip) {
   const subs = readSubs().filter((s) => {
     if (!kind) return true;
     const p = prefsOf(s);
+    if (skip && skip(p)) return false;
     return p[kind] && !(p.quiet && s.viewingAt && Date.now() - Date.parse(s.viewingAt) < 30_000);
   });
   if (!subs.length) return 0;
@@ -194,7 +196,9 @@ function notifyStatus(s, prev) {
     // 마지막 답은 작업이 끝나는 것과 거의 같은 때 기록되므로 잠깐 기다렸다가 그 답을 알림 본문에 담는다.
     setTimeout(() => {
       const last = readChat().messages.filter((m) => m.from === 'agent' && m.session === s.session).at(-1);
-      pushAll({ title: `${name} 작업 끝`, body: last ? plainBody(last.text) : '하던 일을 마쳤습니다', tag: `uifb-done-${s.session}` }, 'done');
+      // 마지막 답을 이미 답장 알림으로 보냈으면, 답장 알림을 켠 기기에는 작업 끝 알림을 또 보내지 않는다(같은 글이 두 번 오지 않게).
+      const dup = last && answerPushed.has(last.id);
+      pushAll({ title: `${name} 작업 끝`, body: last ? plainBody(last.text) : '하던 일을 마쳤습니다', tag: `uifb-done-${s.session}` }, 'done', dup ? (p) => p.answer : null);
     }, 3000);
   }
 }
@@ -324,6 +328,7 @@ function addChat(msg) {
   // 세션이 답하면 알림을 켠 기기들에 알린다.
   if (entry.from === 'agent' && entry.session) {
     const name = findSession(entry.session)?.name || '세션';
+    answerPushed.add(entry.id);
     pushAll({ title: `${name} 답장`, body: plainBody(entry.text), tag: `uifb-${entry.session}` }, 'answer');
   }
   const talkedTo = entry.from === 'user' ? entry.session || entry.to : null;
