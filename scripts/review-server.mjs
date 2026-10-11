@@ -509,7 +509,7 @@ function draftText(d) {
 function sendPlain(ids, device, interject) {
   const store = readDrafts();
   const picked = store.drafts.filter((d) => ids.includes(d.id));
-  const sent = picked.map((d) => addChat({ from: 'user', to: d.to, text: d.text, where: d.where, context: d.context, round: d.round, device: device || d.device, interject })).filter(Boolean);
+  const sent = picked.map((d) => addChat({ from: 'user', to: d.to, text: d.text, where: d.where, context: d.context, round: d.round, device: device || d.device, interject, replyTo: d.replyTo, replyQuote: d.replyQuote, refer: d.refer })).filter(Boolean);
   toTrash(store, picked, 'sent', Object.fromEntries(picked.map((d, i) => [d.id, { msgId: sent[i]?.id }])));
   store.drafts = store.drafts.filter((d) => !ids.includes(d.id));
   writeDrafts(store);
@@ -554,7 +554,9 @@ function handleDrafts(req) {
     const cid = typeof req.cid === 'string' ? req.cid.slice(0, 80) : null;
     const dup = cid && [...store.drafts, ...store.trash].find((x) => x.cid === cid);
     if (dup) return { status: 200, body: dup };
-    const d = { id: store.nextId++, to: req.to, text, label: cleanLabel(req.label), device: req.device === 'mobile' ? 'mobile' : req.device === 'desktop' ? 'desktop' : null, context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString(), ...(req.hold === true ? { hold: true } : {}), ...(Number.isInteger(req.fromMsg) ? { fromMsg: req.fromMsg } : {}), ...(cid ? { cid } : {}) };
+    const d = { id: store.nextId++, to: req.to, text, label: cleanLabel(req.label), device: req.device === 'mobile' ? 'mobile' : req.device === 'desktop' ? 'desktop' : null, context: req.context === 'review' ? 'review' : 'app', round: Number(req.round) || null, where: cleanWhere(req.where), commit: currentCommit(), at: new Date().toISOString(), ...(req.hold === true ? { hold: true } : {}), ...(Number.isInteger(req.fromMsg) ? { fromMsg: req.fromMsg } : {}), ...(cid ? { cid } : {}),
+      // 답장·참고를 붙인 채 담았으면 그대로 남겨, 보류에서 보낼 때 함께 보낸다.
+      ...(Number.isInteger(req.replyTo) && req.replyTo > 0 ? { replyTo: req.replyTo, ...(typeof req.replyQuote === 'string' && req.replyQuote.trim() ? { replyQuote: req.replyQuote.trim().slice(0, 500) } : {}), ...(req.refer === true ? { refer: true } : {}) } : {}) };
     store.drafts.push(d);
     writeDrafts(store);
     return { status: 200, body: d };
