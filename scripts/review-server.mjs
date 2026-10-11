@@ -14,6 +14,7 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { lanAuth } from './lan-auth.mjs';
+import { vapidKeys, sendPush } from './web-push.mjs';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -28,6 +29,10 @@ const SHARED = {
   '/__uifb/widget.js': ['app-widget.js', 'text/javascript; charset=utf-8'],
   '/__uifb/review-page.js': ['review-page.js', 'text/javascript; charset=utf-8'],
   '/__uifb/review-page.css': ['review-page.css', 'text/css; charset=utf-8'],
+  '/__uifb/sw.js': ['sw.js', 'text/javascript; charset=utf-8'],
+  '/__uifb/icon-180.png': ['icon-180.png', 'image/png'],
+  '/__uifb/icon-192.png': ['icon-192.png', 'image/png'],
+  '/__uifb/icon-512.png': ['icon-512.png', 'image/png'],
 };
 const port = Number(arg('port', '4799'));
 const MAX_BODY = 256 * 1024;
@@ -145,6 +150,32 @@ function cleanWhere(w) {
   return { url: str(w.url, 300), selector: str(w.selector, 300), text: str(w.text, 120), rect: num(w.rect), viewport: num(w.viewport) };
 }
 
+// ── 알림(웹 푸시) 구독 ──
+const subsFile = path.join(root, 'push-subs.json');
+function readSubs() {
+  try { return JSON.parse(fs.readFileSync(subsFile, 'utf8')); } catch { return []; }
+}
+function writeSubs(list) {
+  fs.writeFileSync(subsFile, JSON.stringify(list, null, 2) + '\n', { mode: 0o600 });
+}
+// 구독한 모든 기기에 보낸다. 끝난 구독(404·410)은 지운다. 보낸 수를 돌려준다(실패해도 대화 기록은 막지 않는다).
+async function pushAll(data) {
+  const subs = readSubs();
+  if (!subs.length) return 0;
+  const keys = vapidKeys(root);
+  let sent = 0;
+  const gone = new Set();
+  await Promise.all(subs.map(async (s) => {
+    try {
+      const st = await sendPush(keys, s, { ...data, url: s.url });
+      if (st === 404 || st === 410) gone.add(s.endpoint);
+      else if (st < 300) sent++;
+    } catch {}
+  }));
+  if (gone.size) writeSubs(readSubs().filter((s) => !gone.has(s.endpoint)));
+  return sent;
+}
+
 // ── 세션끼리 주고받은 메시지 ──
 // 보낸 세션의 훅이 보낼 때(PreToolUse SendMessage) 한 번, 받은 세션의 훅이 받을 때(UserPromptSubmit) 한 번 알려 온다.
 // SendMessage 는 받는 쪽을 세션 이름(peer 이름)으로 부르고, 그 이름은 대화창 탭 이름과 다르다.
@@ -238,6 +269,11 @@ function addChat(msg) {
   const target = entry.from === 'user' && entry.to ? findSession(entry.to) : null;
   if (target?.tool === 'codex' && !msg.noQueue) { queueToCodex(target, entry); markDelivered(target.sessionId, entry.id); } // noQueue: 서버가 따로 넣는 글(리뷰 완료)이 있어 두 번 넣지 않는다
   // 사용자가 터미널이나 화면에서 그 세션에 말을 걸었다면 그때까지의 답은 읽은 것이다.
+  // 세션이 답하면 알림을 켠 기기들에 알린다.
+  if (entry.from === 'agent' && entry.session) {
+    const name = findSession(entry.session)?.name || '세션';
+    pushAll({ title: `${name} 답장`, body: entry.text.replace(/[`*#>]/g, '').replace(/\s+/g, ' ').slice(0, 140), tag: `uifb-${entry.session}` });
+  }
   const talkedTo = entry.from === 'user' ? entry.session || entry.to : null;
   if (talkedTo) markSeen({ [talkedTo]: entry.at });
   return entry;
@@ -602,7 +638,8 @@ const server = http.createServer((req, res) => {
   // 위젯은 /__uifb/api/* 로 부르므로, 리뷰 서버에서는 앞의 /__uifb 를 떼고 같은 API 로 처리한다.
   if (SHARED[url.pathname]) {
     const [file, type] = SHARED[url.pathname];
-    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+    // 서비스 워커는 /__uifb/ 아래 있지만 페이지 전체(/)를 맡게 한다(화면 요청은 가로채지 않고 알림만 띄운다).
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', ...(file === 'sw.js' ? { 'Service-Worker-Allowed': '/' } : {}) });
     return res.end(fs.readFileSync(path.join(assetsDir, file)));
   }
   if (url.pathname.startsWith('/__uifb/api/')) url.pathname = url.pathname.slice('/__uifb'.length);
@@ -633,6 +670,43 @@ const server = http.createServer((req, res) => {
       } catch {
         send(res, 400, { error: 'session, state(working|permission|idle)가 필요합니다.' });
       }
+    });
+    return;
+  }
+
+  // 홈 화면에 앱처럼 설치하기 위한 정보. start 는 설치한 화면의 주소(앱 화면이면 /worklog 등).
+  if (url.pathname === '/__uifb/manifest.webmanifest') {
+    const start = /^\/[\w\-./]*$/.test(url.searchParams.get('start') || '') ? url.searchParams.get('start') : '/';
+    const startUrl = start + (auth.key ? `?k=${auth.key}` : '');
+    return send(res, 200, { name: '대화/피드백', short_name: '대화', start_url: startUrl, scope: '/', display: 'standalone', background_color: '#f6f5f1', theme_color: '#4f46e5', icons: [192, 512].map((n) => ({ src: `/__uifb/icon-${n}.png`, sizes: `${n}x${n}`, type: 'image/png' })) });
+  }
+
+  // 알림(웹 푸시): 공개 키 주기, 기기 구독 받기·빼기, 시험 보내기
+  if (url.pathname === '/api/push-key') return send(res, 200, { publicKey: vapidKeys(root).publicKey });
+  if ((url.pathname === '/api/push-subscribe' || url.pathname === '/api/push-unsubscribe' || url.pathname === '/api/push-test') && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_BODY) req.destroy();
+    });
+    req.on('end', async () => {
+      let b = {};
+      try { b = JSON.parse(body); } catch {}
+      const subs = readSubs();
+      if (url.pathname === '/api/push-test') {
+        const n = await pushAll({ title: '대화/피드백', body: '알림이 잘 옵니다.', tag: 'uifb-test' });
+        return send(res, 200, { sent: n });
+      }
+      const ep = b.subscription?.endpoint || b.endpoint;
+      if (typeof ep !== 'string' || !/^https:\/\//.test(ep)) return send(res, 400, { error: 'endpoint 가 필요합니다.' });
+      const rest = subs.filter((s) => s.endpoint !== ep);
+      if (url.pathname === '/api/push-subscribe') {
+        const k = b.subscription?.keys;
+        if (!k?.p256dh || !k?.auth) return send(res, 400, { error: 'keys 가 필요합니다.' });
+        rest.push({ endpoint: ep, keys: { p256dh: String(k.p256dh), auth: String(k.auth) }, url: typeof b.url === 'string' && b.url.startsWith('/') ? b.url.slice(0, 200) : '/', device: b.device === 'mobile' ? 'mobile' : 'desktop', at: new Date().toISOString() });
+      }
+      writeSubs(rest);
+      send(res, 200, { ok: true, count: rest.length });
     });
     return;
   }
