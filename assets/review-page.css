@@ -58,6 +58,7 @@ figure.tall img { max-height: 640px; width: auto; max-width: 100%; }
 .opt[aria-pressed="true"][data-v="tweak"] { background: var(--warn-soft); color: var(--warn); border-color: transparent; font-weight: 600; }
 .opt[aria-pressed="true"][data-v="revert"] { background: var(--bad-soft); color: var(--bad); border-color: transparent; font-weight: 600; }
 .opt.pick[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: transparent; font-weight: 600; }
+.itemnote { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-2); padding: 8px 12px; border-radius: 6px; background: var(--paper); }
 .optnote { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
 figcaption a { margin-left: auto; color: var(--accent); }
 .demo iframe { width: 100%; height: 700px; border: 0; border-radius: 12px; background: var(--paper); outline: 1px solid var(--rule); outline-offset: -1px; }

@@ -359,6 +359,12 @@ function render() {
       }
       ul.append(li);
     });
+    // 항목 전체에 대한 참고(캡처 조건 차이, "모바일도 같음", 조각에서 안 움직이는 것 등)는 변경 목록 아래에 둔다.
+    if (it.note) {
+      const p = document.createElement('p');
+      p.className = 'itemnote'; p.textContent = it.note;
+      ul.after(p);
+    }
     // 화면 비교는 데스크톱과 모바일(390px)을 함께 본다. 직접 찍은 캡처 중 모바일 폭이 없으면 눈에 띄게 알린다.
     const vps = optionsOf(it).flatMap((o) => (o.shots || []).map((x) => imgOf(x).source?.viewport)).filter(Boolean);
     if (vps.length && !vps.some((v) => parseInt(v, 10) < 768)) {
