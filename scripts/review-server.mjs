@@ -196,6 +196,7 @@ function addChat(msg) {
   if (typeof msg.context === 'string') entry.context = msg.context.slice(0, 20);
   if (msg.device === 'mobile' || msg.device === 'desktop') entry.device = msg.device;
   if (cleanWhere(msg.where)) entry.where = cleanWhere(msg.where);
+  if (Number.isInteger(msg.replyTo) && msg.replyTo > 0 && msg.replyTo < entry.id) entry.replyTo = msg.replyTo;
   chat.messages.push(entry);
   fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
   const target = entry.from === 'user' && entry.to ? findSession(entry.to) : null;
