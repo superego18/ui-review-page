@@ -152,15 +152,24 @@ function cleanWhere(w) {
 
 // ── 알림(웹 푸시) 구독 ──
 const subsFile = path.join(root, 'push-subs.json');
+const plainBody = (t) => String(t).replace(/^\s*<re[^>]*>\s*/, '').replace(/[`*#>]/g, '').replace(/\s+/g, ' ').slice(0, 140);
 function readSubs() {
   try { return JSON.parse(fs.readFileSync(subsFile, 'utf8')); } catch { return []; }
 }
 function writeSubs(list) {
   fs.writeFileSync(subsFile, JSON.stringify(list, null, 2) + '\n', { mode: 0o600 });
 }
-// 구독한 모든 기기에 보낸다. 끝난 구독(404·410)은 지운다. 보낸 수를 돌려준다(실패해도 대화 기록은 막지 않는다).
-async function pushAll(data) {
-  const subs = readSubs();
+// 기기마다 고른 알림 종류. answer 세션 답장, done 작업 끝남, permission 승인 필요, review 비교 페이지 준비, stale 오래 멈춤, peer 세션끼리 메시지.
+// quiet: 그 기기에서 대화창을 보고 있는 동안(최근 30초 안에 보고 있다고 알려 옴)에는 보내지 않는다.
+const PUSH_DEFAULTS = { answer: true, done: true, permission: true, review: true, stale: true, peer: false, quiet: true };
+const prefsOf = (s) => ({ ...PUSH_DEFAULTS, ...(s.prefs || {}) });
+// 구독한 기기 중 kind 를 켠 기기에 보낸다(kind 가 없으면 모두, 시험용). 끝난 구독(404·410)은 지운다. 보낸 수를 돌려준다(실패해도 대화 기록은 막지 않는다).
+async function pushAll(data, kind) {
+  const subs = readSubs().filter((s) => {
+    if (!kind) return true;
+    const p = prefsOf(s);
+    return p[kind] && !(p.quiet && s.viewingAt && Date.now() - Date.parse(s.viewingAt) < 30_000);
+  });
   if (!subs.length) return 0;
   const keys = vapidKeys(root);
   let sent = 0;
@@ -175,6 +184,42 @@ async function pushAll(data) {
   if (gone.size) writeSubs(readSubs().filter((s) => !gone.has(s.endpoint)));
   return sent;
 }
+
+// 상태가 바뀔 때의 알림: 작업 끝남(작업 중 → 쉬는 중), 승인 필요(→ 승인 대기).
+function notifyStatus(s, prev) {
+  const name = findSession(s.session)?.name || '세션';
+  const busy = (x) => x === 'working' || x === 'permission';
+  if (s.state === 'permission' && prev.state !== 'permission') pushAll({ title: `${name} 승인 필요`, body: s.detail || '터미널에서 승인을 기다리는 중', tag: `uifb-perm-${s.session}` }, 'permission');
+  if (s.state === 'idle' && busy(prev.state)) {
+    // 마지막 답은 작업이 끝나는 것과 거의 같은 때 기록되므로 잠깐 기다렸다가 그 답을 알림 본문에 담는다.
+    setTimeout(() => {
+      const last = readChat().messages.filter((m) => m.from === 'agent' && m.session === s.session).at(-1);
+      pushAll({ title: `${name} 작업 끝`, body: last ? plainBody(last.text) : '하던 일을 마쳤습니다', tag: `uifb-done-${s.session}` }, 'done');
+    }, 3000);
+  }
+}
+// 오래 멈춤: "작업 중"이 5분 넘게 그대로면 그 상태에 한 번 알린다.
+const staleSent = new Map();
+setInterval(() => {
+  for (const x of listSessions()) {
+    const st = x.status;
+    if (st?.state !== 'working' || !st.at || Date.now() - Date.parse(st.at) < 5 * 60_000 || staleSent.get(x.id) === st.at) continue;
+    staleSent.set(x.id, st.at);
+    pushAll({ title: `${x.name} 오래 멈춤`, body: `"${st.detail || '작업 중'}" 상태가 5분 넘게 그대로예요`, tag: `uifb-stale-${x.id}` }, 'stale');
+  }
+}, 60_000).unref();
+// 비교 페이지 준비: .ui-feedback 에 review*.html 이 새로 생기면 알린다.
+try {
+  const known = new Set(fs.readdirSync(root).filter((f) => /^review.*\.html$/.test(f)));
+  fs.watch(root, (ev, f) => {
+    if (!f || !/^review.*\.html$/.test(f) || known.has(f) || !fs.existsSync(path.join(root, f))) return;
+    known.add(f);
+    setTimeout(() => {
+      const title = /<title>([^<]*)<\/title>/.exec(fs.readFileSync(path.join(root, f), 'utf8'))?.[1] || f;
+      pushAll({ title: '비교 페이지 준비', body: `${title} — 평가할 차례예요`, tag: `uifb-review-${f}` }, 'review');
+    }, 1500);
+  });
+} catch {}
 
 // ── 세션끼리 주고받은 메시지 ──
 // 보낸 세션의 훅이 보낼 때(PreToolUse SendMessage) 한 번, 받은 세션의 훅이 받을 때(UserPromptSubmit) 한 번 알려 온다.
@@ -210,7 +255,9 @@ function addPeer(msg, text) {
     chat.messages.push(entry);
   }
   fs.writeFileSync(chatFile, JSON.stringify(chat, null, 2) + '\n');
-  return chat.messages.at(-1);
+  const last = chat.messages.at(-1);
+  if (!sid(msg.to)) pushAll({ title: `${findSession(last.session)?.name || '세션'} → ${last.to ? findSession(last.to)?.name || last.toName : last.toName}`, body: plainBody(text), tag: 'uifb-peer' }, 'peer');
+  return last;
 }
 
 // 보관함에서 보낸 메시지의 구조(분류, 항목마다 글·위치·저장 시각·커밋·담은 화면). 대화창이 사용자가 쓴 글과 위치 같은 덧붙인 정보를 나눠 보이고,
@@ -272,7 +319,7 @@ function addChat(msg) {
   // 세션이 답하면 알림을 켠 기기들에 알린다.
   if (entry.from === 'agent' && entry.session) {
     const name = findSession(entry.session)?.name || '세션';
-    pushAll({ title: `${name} 답장`, body: entry.text.replace(/[`*#>]/g, '').replace(/\s+/g, ' ').slice(0, 140), tag: `uifb-${entry.session}` });
+    pushAll({ title: `${name} 답장`, body: plainBody(entry.text), tag: `uifb-${entry.session}` }, 'answer');
   }
   const talkedTo = entry.from === 'user' ? entry.session || entry.to : null;
   if (talkedTo) markSeen({ [talkedTo]: entry.at });
@@ -665,6 +712,8 @@ const server = http.createServer((req, res) => {
         if (!/^[\w.-]{1,80}$/.test(String(s.session)) || !['working', 'permission', 'idle'].includes(s.state)) throw new Error();
         // 다른 세션에 메시지를 보내는 중이면(peer) 받는 세션을 함께 적어, 대화창이 세션 탭 사이에 화살표를 그린다.
         const to = s.peer ? readPeers()[peerName(s.peer)] : undefined;
+        const prev = readStatus(s.session);
+        notifyStatus(s, prev);
         fs.writeFileSync(path.join(root, `status-${s.session}.json`), JSON.stringify({ state: s.state, detail: String(s.detail || '').slice(0, 120), at: new Date().toISOString(), ...(s.peer ? { peer: peerName(s.peer) } : {}), ...(to ? { peerTo: to } : {}) }) + '\n');
         send(res, 200, { ok: true });
       } catch {
@@ -683,7 +732,7 @@ const server = http.createServer((req, res) => {
 
   // 알림(웹 푸시): 공개 키 주기, 기기 구독 받기·빼기, 시험 보내기
   if (url.pathname === '/api/push-key') return send(res, 200, { publicKey: vapidKeys(root).publicKey });
-  if ((url.pathname === '/api/push-subscribe' || url.pathname === '/api/push-unsubscribe' || url.pathname === '/api/push-test') && req.method === 'POST') {
+  if ((url.pathname === '/api/push-subscribe' || url.pathname === '/api/push-unsubscribe' || url.pathname === '/api/push-test' || url.pathname === '/api/push-prefs' || url.pathname === '/api/push-viewing') && req.method === 'POST') {
     let body = '';
     req.on('data', (chunk) => {
       body += chunk;
@@ -699,6 +748,18 @@ const server = http.createServer((req, res) => {
       }
       const ep = b.subscription?.endpoint || b.endpoint;
       if (typeof ep !== 'string' || !/^https:\/\//.test(ep)) return send(res, 400, { error: 'endpoint 가 필요합니다.' });
+      // 이 기기의 알림 설정 읽기·바꾸기, 이 기기에서 대화창을 보고 있다는 신호
+      const me = subs.find((x) => x.endpoint === ep);
+      if (url.pathname === '/api/push-prefs') {
+        if (!me) return send(res, 404, { error: '알림을 켠 기기가 아닙니다.' });
+        if (b.prefs && typeof b.prefs === 'object') me.prefs = Object.fromEntries(Object.keys(PUSH_DEFAULTS).map((k) => [k, k in b.prefs ? b.prefs[k] === true : prefsOf(me)[k]]));
+        writeSubs(subs);
+        return send(res, 200, { prefs: prefsOf(me) });
+      }
+      if (url.pathname === '/api/push-viewing') {
+        if (me) { me.viewingAt = new Date().toISOString(); writeSubs(subs); }
+        return send(res, 200, { ok: true });
+      }
       const rest = subs.filter((s) => s.endpoint !== ep);
       if (url.pathname === '/api/push-subscribe') {
         const k = b.subscription?.keys;
