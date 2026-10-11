@@ -62,7 +62,7 @@ const REVIEW = {
 </script>
 <!-- 화면 동작은 리뷰 서버가 내보내는 공용 파일을 쓴다. 고칠 때는 assets/review-page.js·review-page.css 를 고친다. -->
 <script src="/__uifb/review-page.js"></script>
-<!-- 대화/피드백 창은 앱 화면과 같은 위젯(assets/app-widget.js)을 리뷰 서버가 내보낸다. 이 페이지에는 대화 코드를 두지 않는다. -->
+<!-- 대화/피드백 창은 agent-chat-widget 의 위젯을 대화창 서버가 내보낸다(함께 붙여 쓸 때만 뜨고, 비교 페이지 서버만 쓰면 이 줄은 아무것도 하지 않는다). -->
 <script>window.__uifbConfig = { context: 'review', round: REVIEW.round, label: REVIEW.name || `${REVIEW.round}차 비교`, pick: true };</script>
 <script src="/__uifb/widget.js" defer></script>
 </html>
