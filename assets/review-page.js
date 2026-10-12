@@ -145,7 +145,36 @@ function liveFrame(live, marks) {
   return wrap;
 }
 
-function shot(image, label, tone, itemId, texts) {
+// 실제 앱: 전·후를 각각 돌고 있는 앱(예전 커밋은 live-app.mjs 로 띄움)으로 연다. 자바스크립트까지 동작하고, 상태는 직접 눌러서 만든다.
+// REVIEW.apps = { before: { local: 4811, remote: 8811 }, after: { local: 4812, remote: 8812 } }, 항목 appPath = '/worklog?…'
+// 이 컴퓨터에서 열면 local 포트로, 다른 기기(Tailscale https)에서 열면 같은 주소의 remote 포트로 연다.
+const IS_LOCAL = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
+function appFor(it, o) {
+  const conf = o.app || REVIEW.apps?.[o.tone === 'before' ? 'before' : 'after'];
+  const p = o.app?.path || it.appPath;
+  if (!conf || !p) return null;
+  return IS_LOCAL ? `http://localhost:${conf.local}${p}` : `${location.protocol}//${location.hostname}:${conf.remote}${p}`;
+}
+
+function appFrame(url, viewport) {
+  const [vw, vh] = String(viewport || '1440×900').split('×').map(Number);
+  const wrap = document.createElement('div');
+  wrap.className = 'appwrap';
+  wrap.style.aspectRatio = `${vw} / ${vh}`;
+  wrap.load = () => {
+    if (wrap.querySelector('iframe')) return;
+    const frame = document.createElement('iframe');
+    frame.src = url; frame.title = '실제 앱';
+    Object.assign(frame.style, { width: vw + 'px', height: vh + 'px' });
+    wrap.append(frame);
+    const fit = () => { frame.style.transform = `scale(${wrap.clientWidth / vw})`; };
+    new ResizeObserver(fit).observe(wrap);
+    fit();
+  };
+  return wrap;
+}
+
+function shot(image, label, tone, itemId, texts, app) {
   const { file, marks, source, live } = imgOf(image);
   const f = document.createElement('figure');
   f.className = tone;
@@ -170,6 +199,13 @@ function shot(image, label, tone, itemId, texts) {
     f.append(liveFrame(live, marks));
     const open = document.createElement('a');
     open.href = live.file; open.target = '_blank'; open.className = 'liveopen'; open.textContent = '실제 크기로 열기';
+    cap.append(open);
+  }
+  if (app) {
+    f.classList.add('hasapp');
+    f.append(appFrame(app, source?.viewport));
+    const open = document.createElement('a');
+    open.href = app; open.target = '_blank'; open.className = 'appopen'; open.textContent = '새 창으로 열기';
     cap.append(open);
   }
   const src = sourceLine(source);
@@ -394,7 +430,7 @@ function render() {
       figs.forEach((f) => { f.style.gridColumn = optionsOf(it).indexOf(o) + 1; });
       rows.desktop.push(...figs);
       for (const x of o.shots || []) {
-        const f = shot(x, o.label, o.tone || 'after', it.id, texts);
+        const f = shot(x, o.label, o.tone || 'after', it.id, texts, appFor(it, o));
         f.style.gridColumn = optionsOf(it).indexOf(o) + 1;
         figs.push(f);
         const kind = parseInt(imgOf(x).source?.viewport, 10) < 768 ? 'mobile' : 'desktop';
@@ -437,23 +473,26 @@ function render() {
       shots.append(row);
     }
     // 움직이는 조각이 있으면 캡처와 조각을 항목 단위로 바꿔 본다(전·후가 같은 방식으로 보이게).
-    if (shots.querySelector('.livewrap')) {
+    // 보기 방식: 캡처 / 움직여 보기(떼어 낸 조각, CSS 만) / 실제 앱(자바스크립트까지). 항목 단위로 바꿔 전·후가 같은 방식으로 보이게 한다.
+    const modes = [['shot', '캡처'], ...(shots.querySelector('.livewrap') ? [['live', '움직여 보기']] : []), ...(shots.querySelector('.appwrap') ? [['app', '실제 앱']] : [])];
+    if (modes.length > 1) {
       const tg = document.createElement('div');
       tg.className = 'livetoggle';
-      for (const [on, text] of [[false, '캡처'], [true, '움직여 보기']]) {
+      for (const [mode, text] of modes) {
         const b = document.createElement('button');
-        b.type = 'button'; b.textContent = text; b.setAttribute('aria-pressed', String(!on));
+        b.type = 'button'; b.textContent = text; b.setAttribute('aria-pressed', String(mode === 'shot'));
         b.onclick = () => {
-          sec.classList.toggle('live', on);
-          tg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-          if (on) shots.querySelectorAll('.livewrap').forEach((w) => w.load());
+          sec.classList.toggle('live', mode === 'live');
+          sec.classList.toggle('app', mode === 'app');
+          tg.querySelectorAll('button:not(.replay)').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+          shots.querySelectorAll(mode === 'live' ? '.livewrap' : mode === 'app' ? '.appwrap' : ':not(*)').forEach((w) => w.load());
         };
         tg.append(b);
       }
-      // 등장 애니메이션은 한 번 지나가면 다시 볼 수 없으므로, 전·후 조각을 함께 처음부터 다시 띄운다.
+      // 등장 애니메이션은 한 번 지나가면 다시 볼 수 없으므로, 지금 보는 전·후를 함께 처음부터 다시 띄운다.
       const replay = document.createElement('button');
       replay.type = 'button'; replay.className = 'replay'; replay.textContent = '↻ 다시 재생';
-      replay.onclick = () => shots.querySelectorAll('.livewrap iframe').forEach((f) => f.contentWindow.location.reload());
+      replay.onclick = () => shots.querySelectorAll(sec.classList.contains('app') ? '.appwrap iframe' : '.livewrap iframe').forEach((f) => { f.src = f.src; });
       tg.append(replay);
       shots.before(tg);
     }

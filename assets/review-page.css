@@ -29,18 +29,22 @@ header p { color: var(--ink-2); margin: 0; line-height: 1.6; }
 .shotrow { display: grid; gap: 6px; min-width: 0; }
 .rowlabel { margin: 0; font-size: 12px; font-weight: 600; color: var(--ink-3); }
 .shotgrid { display: grid; gap: 12px var(--colgap); align-items: start; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); }
-.shotrow.mobile figure > button, .shotrow.mobile figure > .livewrap { max-width: 300px; }
+.shotrow.mobile figure > button, .shotrow.mobile figure > .livewrap, .shotrow.mobile figure > .appwrap { max-width: 300px; }
 .livewrap { position: relative; width: 100%; overflow: hidden; border-radius: 6px; outline: 1px solid var(--rule); outline-offset: -1px; }
 .livewrap iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; }
 .item:not(.live) .livewrap, .item.live figure.haslive > button { display: none; }
+.appwrap { position: relative; width: 100%; overflow: hidden; border-radius: 6px; outline: 1px solid var(--rule); outline-offset: -1px; }
+.appwrap iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; background: #fff; }
+.item:not(.app) .appwrap, .item.app figure.hasapp > button, .item:not(.app) .appopen { display: none; }
+.appopen { margin-left: auto; font-size: 12px; }
 .livetoggle { display: flex; gap: 4px; }
 .livetoggle button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); cursor: pointer; }
-.item:not(.live) .livetoggle .replay, .item:not(.live) .liveopen { display: none; }
+.item:not(.live):not(.app) .livetoggle .replay, .item:not(.live) .liveopen { display: none; }
 .liveopen { margin-left: auto; font-size: 12px; }
 /* 움직여 볼 때 데스크톱 조각은 칸을 나누지 않고 전·후를 위아래로 크게 놓는다(줄이면 확인할 수 없을 만큼 작아서). */
-.item.live .shotrow.desktop .shotgrid { grid-template-columns: minmax(0, 1fr); }
-.item.live .shotrow.desktop figure { grid-column: 1 !important; }
-.item.live .shots .divider { display: none; }
+.item.live .shotrow.desktop .shotgrid, .item.app .shotrow.desktop .shotgrid { grid-template-columns: minmax(0, 1fr); }
+.item.live .shotrow.desktop figure, .item.app .shotrow.desktop figure { grid-column: 1 !important; }
+.item.live .shots .divider, .item.app .shots .divider { display: none; }
 .livetoggle .replay { margin-left: 4px; }
 .livetoggle button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .shots .divider { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); pointer-events: none; }
