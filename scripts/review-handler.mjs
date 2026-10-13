@@ -106,20 +106,24 @@ function listPages() {
     const total = (body.match(/["']?id["']?\s*:\s*["']/g) || []).length;
     const fb = round && feedbackFile(round) ? readFeedback(feedbackFile(round), round) : null;
     const rated = fb ? Object.values(fb.items || {}).filter((it) => it.verdict).length : 0;
+    const done = !!fb?.done, at = st.mtime.toISOString(), isHidden = hidden.has(file), session = field('session');
+    // 대화창은 이 모양(목록 공통 틀)대로 그리기만 한다: 제목·주소·상태(문구와 색: done/part/todo)·덧붙일 설명·단추(누르면 보낼 요청).
     return {
-      file, round, total, rated,
-      name: field('name') || html.match(/<title>([^<]*)<\/title>/)?.[1] || file,
-      session: field('session'),
-      done: !!fb?.done,
-      at: st.mtime.toISOString(),
-      hidden: hidden.has(file),
+      at,
+      title: field('name') || html.match(/<title>([^<]*)<\/title>/)?.[1] || file,
+      href: '/' + (file === 'review.html' ? '' : file), // 이 서버 기준 경로
+      status: done ? { text: '평가 완료', tone: 'done' } : rated ? { text: `평가 중 ${rated}/${total}`, tone: 'part' } : { text: `평가 전 · 항목 ${total}개`, tone: 'todo' },
+      meta: [/^\d+$/.test(round || '') ? `${round}차` : round, session].filter(Boolean),
+      hidden: isHidden,
+      actions: [{ label: isHidden ? '다시 보이기' : '숨기기', url: '/api/pages', body: { file, hidden: !isHidden }, toast: isHidden ? '✓ 다시 보임' : '✓ 숨김(파일은 남아 있음)' }],
     };
   }).sort((a, b) => b.at.localeCompare(a.at));
 }
+const pagesBody = (req) => ({ title: '비교 페이지', empty: '띄워 둔 비교 페이지가 없습니다.', items: listPages(), port: req.socket.localPort }); // port: 앱 화면 대화창이 이 서버 주소를 만들 때 씀
 
 function inner(req, res, url) {
   if (url.pathname === '/api/pages') {
-    if (req.method === 'GET') return send(res, 200, { pages: listPages(), port: req.socket.localPort }); // port: 앱 화면 대화창이 비교 페이지 주소를 만들 때 씀
+    if (req.method === 'GET') return send(res, 200, pagesBody(req));
     if (req.method === 'POST') {
       let body = '';
       req.on('data', (c) => { body += c; if (body.length > MAX_BODY) req.destroy(); });
@@ -130,7 +134,7 @@ function inner(req, res, url) {
         const hidden = readHidden();
         if (b.hidden) hidden.add(b.file); else hidden.delete(b.file);
         fs.writeFileSync(pagesFile, JSON.stringify({ hidden: [...hidden] }, null, 2) + '\n');
-        send(res, 200, { pages: listPages() });
+        send(res, 200, pagesBody(req));
       });
       return true;
     }
