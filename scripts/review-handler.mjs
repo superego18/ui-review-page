@@ -89,7 +89,52 @@ function recordCapture(r) {
   return db.shots[r.file];
 }
 
+// 비교 페이지 목록(#1886): <root>/review*.html 마다 이름·차수·반영 세션·평가 상태. 숨긴 페이지는 pages.json 에 적는다(파일은 지우지 않는다).
+const pagesFile = path.join(root, 'pages.json');
+const readHidden = () => { try { return new Set(JSON.parse(fs.readFileSync(pagesFile, 'utf8')).hidden || []); } catch { return new Set(); } };
+function listPages() {
+  const hidden = readHidden();
+  let files = [];
+  try { files = fs.readdirSync(root).filter((f) => /^review[\w-]*\.html$/.test(f)); } catch {}
+  return files.map((file) => {
+    const st = fs.statSync(path.join(root, file));
+    const html = fs.readFileSync(path.join(root, file), 'utf8');
+    const start = html.indexOf('REVIEW = {');
+    const body = (start < 0 ? '' : html.slice(start, html.indexOf('\n};', start))).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'); // 주석 줄(템플릿 예시)은 뺀다
+    const field = (k) => body.match(new RegExp(`["']?${k}["']?\\s*:\\s*(?:["']([^"'\\n]+)["']|(\\d+))`))?.slice(1).find((v) => v !== undefined) ?? null;
+    const round = field('round');
+    const total = (body.match(/["']?id["']?\s*:\s*["']/g) || []).length;
+    const fb = round && feedbackFile(round) ? readFeedback(feedbackFile(round), round) : null;
+    const rated = fb ? Object.values(fb.items || {}).filter((it) => it.verdict).length : 0;
+    return {
+      file, round, total, rated,
+      name: field('name') || html.match(/<title>([^<]*)<\/title>/)?.[1] || file,
+      session: field('session'),
+      done: !!fb?.done,
+      at: st.mtime.toISOString(),
+      hidden: hidden.has(file),
+    };
+  }).sort((a, b) => b.at.localeCompare(a.at));
+}
+
 function inner(req, res, url) {
+  if (url.pathname === '/api/pages') {
+    if (req.method === 'GET') return send(res, 200, { pages: listPages(), port: req.socket.localPort }); // port: 앱 화면 대화창이 비교 페이지 주소를 만들 때 씀
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', (c) => { body += c; if (body.length > MAX_BODY) req.destroy(); });
+      req.on('end', () => {
+        let b;
+        try { b = JSON.parse(body); } catch { return send(res, 400, { error: 'JSON 형식이 아닙니다.' }); }
+        if (typeof b.file !== 'string' || !/^review[\w-]*\.html$/.test(b.file)) return send(res, 400, { error: '없는 비교 페이지입니다.' });
+        const hidden = readHidden();
+        if (b.hidden) hidden.add(b.file); else hidden.delete(b.file);
+        fs.writeFileSync(pagesFile, JSON.stringify({ hidden: [...hidden] }, null, 2) + '\n');
+        send(res, 200, { pages: listPages() });
+      });
+      return true;
+    }
+  }
   if (SHARED[url.pathname]) {
     const [file, type] = SHARED[url.pathname];
     res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
