@@ -567,8 +567,8 @@ function renderMode() {
   const auto = finished ? autoAtDone : autoOn;
   $('#mode').dataset.auto = auto ? 'on' : 'off';
   if (auto && watch.via === 'queue') {
-    $('#modeTitle').textContent = '자동 이어가기 · 큐 요청 설정됨';
-    $('#modeSub').textContent = '큐를 통한 이어가기 요청을 시도하는 설정입니다. 실제 세션 실행 여부는 확인되지 않았습니다.';
+    $('#modeTitle').textContent = '자동 전달 설정됨';
+    $('#modeSub').textContent = '세션에 전달을 요청합니다. 실제 세션 실행 여부는 확인되지 않았습니다.';
   } else if (auto && finished) {
     $('#modeTitle').textContent = `자동 이어가기 · ${watch.agent}가 피드백을 받아 작업을 이어갑니다`;
     $('#modeSub').textContent = '터미널에 보낼 메시지는 없습니다.';
@@ -581,7 +581,7 @@ function renderMode() {
   }
   if (!finished) {
     $('#doneNote').textContent = autoOn && watch.via === 'queue'
-      ? '다 봤으면 완료를 누르세요. 큐를 통한 이어가기 요청을 시도합니다.'
+      ? '다 봤으면 완료를 누르세요. 세션에 전달을 요청합니다.'
       : autoOn
       ? '다 봤으면 완료를 누르세요. 터미널 메시지는 필요 없습니다.'
       : '다 봤으면 완료를 누르고, 터미널에 "피드백 확인해"라고 보내 주세요.';
@@ -609,7 +609,7 @@ $('#done').onclick = async () => {
     await post({ done: true, session: REVIEW.session, name: REVIEW.name });
     renderMode();
     $('#doneNote').textContent = autoAtDone && watch.via === 'queue'
-      ? '완료로 표시했습니다. 큐를 통한 이어가기 요청을 시도합니다. 실제 세션 실행 여부는 확인되지 않았습니다.'
+      ? '완료로 표시했습니다. 세션에 전달을 요청합니다. 실제 세션 실행 여부는 확인되지 않았습니다.'
       : autoAtDone
       ? `완료로 표시했습니다. ${watch.agent}가 이어서 작업합니다. 터미널에 보낼 메시지는 없습니다.`
       : '완료로 표시했습니다. 이제 터미널에 "피드백 확인해"라고 보내 주세요.';

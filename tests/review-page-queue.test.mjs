@@ -49,9 +49,11 @@ async function page(watch, { saved = {}, postOk = true } = {}) {
 }
 
 function assertQueueCopy(p) {
-  assert.match(p.text('#modeTitle'), /큐/);
+  assert.equal(p.text('#modeTitle'), '자동 전달 설정됨');
+  assert.match(p.text('#modeSub'), /세션에 전달을 요청합니다/);
   assert.match(p.text('#modeSub'), /실제 세션 실행 여부/);
   const copy = ['#modeTitle', '#modeSub', '#doneNote'].map((selector) => p.text(selector)).join(' ');
+  assert.doesNotMatch(copy, /큐|queue/i);
   assert.doesNotMatch(copy, /기다리는 중|바로 이어서|받아 작업|이어서 작업합니다|undefined/);
 }
 
@@ -60,7 +62,7 @@ test('configured queue availability is generic and does not imply a running sess
     const p = await page({ active: true, configured: true, via: 'queue', handlesDone: true, agent, expiresAt: '2030-01-01T12:00:00Z' });
     assert.equal(p.element('#mode').dataset.auto, 'on');
     assertQueueCopy(p);
-    assert.match(p.text('#doneNote'), /큐.*시도/);
+    assert.equal(p.text('#doneNote'), '다 봤으면 완료를 누르세요. 세션에 전달을 요청합니다.');
     assert.equal(p.element('#done').disabled, false);
     assert.deepEqual(p.requests.map(({ url }) => url), [
       '/api/watch?round=isolated-test&session=test%2Fsession',
@@ -106,7 +108,7 @@ test('queue completion saves the same payload without claiming execution', async
   await p.done();
   assert.equal(p.element('#done').disabled, true);
   assertQueueCopy(p);
-  assert.match(p.text('#doneNote'), /^완료로 표시했습니다\..*큐.*시도/);
+  assert.equal(p.text('#doneNote'), '완료로 표시했습니다. 세션에 전달을 요청합니다. 실제 세션 실행 여부는 확인되지 않았습니다.');
   const posts = p.requests.filter(({ options }) => options);
   assert.equal(posts.length, 1);
   assert.deepEqual(JSON.parse(posts[0].options.body), { done: true, session: 'test/session', name: 'Test' });
