@@ -53,6 +53,26 @@ test('편집은 번호·생성시각·다른 기록을 유지한다', (t) => {
   assert.equal(store.read().items.find((x) => x.id === b.id).text, '다른 메모');
 });
 
+test('공용 탭의 표시 범위는 저장·재시작·편집 후에도 유지한다', (t) => {
+  const { store, root } = fixture(t);
+  const where = { selector: '[data-feedback-id="variant:a"]', anchorId: 'variant:a', exact: true, tag: 'a', scope: 'path' };
+  const saved = store.create(item({ where }));
+  assert.equal(createAnnotationStore(root).read().items[0].where.scope, 'path');
+  assert.equal(store.update(saved.id, { text: '다른 시안에서도 표시' }).where.scope, 'path');
+  assert.equal(normalizeAnnotation(item({ where: { selector: 'a', scope: 'path' } })).where.scope, undefined);
+});
+
+test('음영 색상은 저장·재시작·편집·내보내기에서 유지하고 예전 기록은 보라로 표시한다', (t) => {
+  const { store, root } = fixture(t);
+  const saved = store.create(item({ color: 'green' }));
+  assert.equal(createAnnotationStore(root).read().items[0].color, 'green');
+  assert.equal(store.update(saved.id, { text: '내용만 수정' }).color, 'green');
+  assert.equal(store.update(saved.id, { color: 'blue' }).color, 'blue');
+  assert.match(fs.readFileSync(path.join(root, 'annotations.md'), 'utf8'), /음영 색상: 파랑/);
+  assert.equal(normalizeAnnotation(item()).color, 'violet');
+  assert.throws(() => normalizeAnnotation(item({ color: '__proto__' })), /색상/);
+});
+
 test('삭제 후에도 번호를 재사용하지 않고 해당 캡처만 삭제한다', (t) => {
   const { store, root } = fixture(t);
   const a = store.create(item({ snapshot: 'data:image/png;base64,YWJj' }));
@@ -80,11 +100,14 @@ test('요청 처리기는 대화창 없이 정적 모듈·저장·수정·삭제
   assert.equal((await fetch(base + '/client.js')).status, 200);
   assert.equal((await fetch(base + '/style.css')).headers.get('content-type'), 'text/css; charset=utf-8');
   assert.equal((await post({ action: 'create', item: item() }, 'https://example.com')).status, 403);
-  const response = await post({ action: 'create', item: item() });
+  assert.equal((await fetch(base + '/colors.mjs')).status, 200);
+  const response = await post({ action: 'create', item: item({ color: 'green' }) });
   const created = (await response.json()).item;
   assert.equal(response.status, 200);
-  await post({ action: 'update', id: created.id, item: { text: '새 의견' } });
-  assert.equal((await (await fetch(base + '/api')).json()).items[0].text, '새 의견');
+  assert.equal(created.color, 'green');
+  await post({ action: 'update', id: created.id, item: { text: '새 의견', color: 'blue' } });
+  const edited = (await (await fetch(base + '/api')).json()).items[0];
+  assert.equal(edited.text, '새 의견'); assert.equal(edited.color, 'blue');
   assert.match(await (await fetch(base + '/export')).text(), /새 의견/);
   await post({ action: 'delete', id: created.id });
   assert.equal((await (await fetch(base + '/api')).json()).items.length, 0);

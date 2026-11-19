@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { COLORS } from '../assets/annotations/colors.mjs';
 
 export const KINDS = { note: '메모', good: '좋아요', change: '수정 요청', question: '질문' };
 const text = (value, max) => typeof value === 'string' ? value.slice(0, max) : '';
@@ -9,6 +10,8 @@ const finite = (value) => Number.isFinite(value) ? value : 0;
 export function normalizeAnnotation(input) {
   const kind = input.kind ?? 'note';
   if (!Object.hasOwn(KINDS, kind)) throw new Error('분류가 올바르지 않습니다.');
+  const color = input.color ?? 'violet';
+  if (!Object.hasOwn(COLORS, color)) throw new Error('음영 색상이 올바르지 않습니다.');
   const note = text(input.text, 8000).trim();
   const url = text(input.url, 3000);
   if (!url.startsWith('http://') && !url.startsWith('https://')) throw new Error('화면 주소가 필요합니다.');
@@ -20,13 +23,14 @@ export function normalizeAnnotation(input) {
       ...(input.where.name !== undefined || input.where.anchorId !== undefined ? {
         name: text(input.where.name, 300), anchorId: text(input.where.anchorId, 500),
         exact: Boolean(input.where.anchorId && input.where.exact === true), tag: text(input.where.tag, 40),
+        ...(input.where.anchorId && input.where.scope === 'path' ? { scope: 'path' } : {}),
       } : {}),
       rect: Object.fromEntries(['x', 'y', 'w', 'h'].map((k) => [k, finite(input.where.rect?.[k])])),
       viewport: { w: finite(input.where.viewport?.w), h: finite(input.where.viewport?.h) },
     };
   }
   if (!note && !where) throw new Error('영역을 선택하거나 메모를 입력하세요.');
-  return { kind, text: note, url, title: text(input.title, 300), where };
+  return { kind, color, text: note, url, title: text(input.title, 300), where };
 }
 
 export function annotationMarkdown(items) {
@@ -34,6 +38,7 @@ export function annotationMarkdown(items) {
   for (const item of items) {
     lines.push(`## ${item.number}. ${KINDS[item.kind]} · ${item.title || '화면'}`, '',
       `- 기록: ${item.createdAt}`, `- 화면: ${item.url}`);
+    lines.push(`- 음영 색상: ${(COLORS[item.color] || COLORS.violet).label}`);
     if (item.where) {
       lines.push(`- 선택: ${item.where.name || item.where.component || '영역'}`, `- 요소: \`${item.where.selector.replaceAll('`', '')}\``);
       if (item.where.anchorId) lines.push(`- 영역 식별자: ${item.where.anchorId} (${item.where.exact ? '고정 영역' : '내부 구조 기반'})`);

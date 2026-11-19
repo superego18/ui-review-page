@@ -1,4 +1,5 @@
-import { labelFor, locationInfo, pageKey } from './dom.js';
+import { labelFor, locationInfo, isCurrentPage } from './dom.js';
+import { COLORS, applyColor } from './colors.mjs';
 
 const LABELS = { note: '메모', good: '좋아요', change: '수정 요청', question: '질문' };
 const element = (tag, text, className) => { const el = document.createElement(tag); if (text) el.textContent = text; if (className) el.className = className; return el; };
@@ -29,6 +30,7 @@ export function createPanel({ root, base, title, onPick, onSave, onDelete, onPre
           <label class="kind-chip"><input type="radio" name="kind" value="change" aria-keyshortcuts="Alt+3" /><span>3 수정 요청</span></label>
           <label class="kind-chip"><input type="radio" name="kind" value="question" aria-keyshortcuts="Alt+4" /><span>4 질문</span></label>
         </div></fieldset>
+        <fieldset class="color-group"><legend>음영 색상</legend><div class="color-chips" id="colors"></div></fieldset>
         <label>피드백 내용<textarea id="text" rows="5" placeholder="좋은 점, 불편한 점, 바꾸고 싶은 점, 질문을 자유롭게 적으세요."></textarea></label>
         <img id="snapshot" alt="선택 당시 화면 캡처" hidden />
         <p class="help">⌘/Ctrl+Enter 저장 · Alt+← 목록 · Esc 닫기<br />위치·시안 주소·작성 시각도 함께 저장해요.</p>
@@ -37,6 +39,11 @@ export function createPanel({ root, base, title, onPick, onSave, onDelete, onPre
     </aside>`;
   root.append(ui);
   const $ = (id) => ui.querySelector('#' + id);
+  for (const [key, color] of Object.entries(COLORS)) {
+    const chip = element('label', '', 'color-chip');
+    const radio = element('input'); radio.type = 'radio'; radio.name = 'color'; radio.value = key; radio.checked = key === 'violet';
+    applyColor(chip, key); chip.append(radio, element('span', color.label)); $('colors').append(chip);
+  }
   let items = [], draft = null, busy = false, isPicking = false;
   const draftKey = '__uifb_annotation_draft:' + location.origin;
   $('export').href = base + '/export';
@@ -47,7 +54,7 @@ export function createPanel({ root, base, title, onPick, onSave, onDelete, onPre
     else if (!isPicking) $('open').focus();
     if (!value) onPreview(null);
   }
-  function currentDraft() { return draft ? { ...draft, text: $('text').value, kind: ui.querySelector('input[name="kind"]:checked').value } : null; }
+  function currentDraft() { return draft ? { ...draft, text: $('text').value, kind: ui.querySelector('input[name="kind"]:checked').value, color: ui.querySelector('input[name="color"]:checked').value } : null; }
   function remember() { try { localStorage.setItem(draftKey, JSON.stringify(currentDraft())); } catch {} }
   function clearDraft() { try { localStorage.removeItem(draftKey); } catch {} }
   function showList() { draft = null; $('editor').hidden = true; $('listing').hidden = false; renderList(); if (!ui.querySelector('.panel').hidden) focusList(); }
@@ -55,6 +62,7 @@ export function createPanel({ root, base, title, onPick, onSave, onDelete, onPre
     draft = { ...item }; $('listing').hidden = true; $('editor').hidden = false;
     $('editor-title').textContent = item.id ? `피드백 ${item.number} 수정` : '새 피드백';
     for (const radio of ui.querySelectorAll('input[name="kind"]')) radio.checked = radio.value === (item.kind || 'note');
+    for (const radio of ui.querySelectorAll('input[name="color"]')) radio.checked = radio.value === (item.color || 'violet');
     $('text').value = item.text || '';
     $('where').textContent = item.where ? `선택: ${labelFor(item)}` : '위치 없는 전체 의견';
     $('binding').textContent = item.where ? locationInfo(item) : '';
@@ -66,22 +74,23 @@ export function createPanel({ root, base, title, onPick, onSave, onDelete, onPre
     const shot = item.snapshot;
     $('snapshot').hidden = !shot;
     if (shot) $('snapshot').src = shot.startsWith('data:') ? shot : base + '/images/' + shot.split('/').at(-1);
-    remember(); if (reveal) open();
+    remember(); if (reveal) { open(); onPreview(currentDraft()); }
   }
   function renderList() {
     const focusedId = root.activeElement?.dataset.id;
-    const shown = items.filter((x) => $('filter').value === 'all' || pageKey(x.url) === pageKey(location.href));
+    const shown = items.filter((x) => $('filter').value === 'all' || isCurrentPage(x));
     const list = $('items'); list.replaceChildren();
     if (!shown.length) list.append(element('li', '아직 피드백이 없어요. 위치를 찍거나 메모를 추가하세요.', 'empty'));
     for (const item of shown) {
       const row = element('li');
       const button = element('button', `${item.number}. ${LABELS[item.kind]} · ${labelFor(item)}`, 'item-title');
       button.type = 'button'; button.dataset.id = item.id; button.onclick = () => { status(''); edit(item); };
+      applyColor(button, item.color); button.classList.add('colored-item');
       button.onpointerenter = () => onPreview(item); button.onpointerleave = () => onPreview(null);
       button.onfocus = () => onPreview(item); button.onblur = () => onPreview(null);
       row.append(button, element('p', item.text || '(메모 없음)'), element('small', item.title || new URL(item.url).search || '화면'));
       if (item.where) row.append(element('small', locationInfo(item)));
-      if (pageKey(item.url) !== pageKey(location.href)) {
+      if (!isCurrentPage(item)) {
         const link = element('a', '해당 시안 열기'); link.href = item.url; row.append(link);
       }
       list.append(row);
@@ -100,6 +109,7 @@ export function createPanel({ root, base, title, onPick, onSave, onDelete, onPre
   $('back').onclick = () => { clearDraft(); showList(); };
   $('text').oninput = remember;
   for (const radio of ui.querySelectorAll('input[name="kind"]')) radio.onchange = remember;
+  for (const radio of ui.querySelectorAll('input[name="color"]')) radio.onchange = () => { remember(); onPreview(currentDraft()); };
   $('filter').onchange = renderList;
   $('editor').onsubmit = (event) => { event.preventDefault(); if (!busy) onSave(currentDraft()); };
   $('delete').onclick = () => { if (!busy && draft?.id) onDelete(draft.id); };

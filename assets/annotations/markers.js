@@ -1,17 +1,20 @@
 import { resolve, labelFor, nameOf } from './dom.js';
+import { applyColor, COLORS } from './colors.mjs';
 
 export function createMarkers({ root, onEdit }) {
   const layer = document.createElement('div'); layer.className = 'markers'; root.append(layer);
   const box = document.createElement('div'); box.className = 'outline'; box.hidden = true; root.append(box);
   const tag = document.createElement('span'); box.append(tag);
-  let items = [], enabled = true, selected = null;
-  const buttons = new Map();
-  function outline(element) {
+  let items = [], enabled = true, selected = null, selectedColor = 'violet';
+  const buttons = new Map(), shades = new Map();
+  function outline(element, color = 'violet') {
     selected = element;
+    selectedColor = color;
     if (!element) { box.hidden = true; return; }
     const r = element.getBoundingClientRect();
     Object.assign(box.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
     tag.textContent = nameOf(element);
+    applyColor(box, color);
     box.hidden = false;
   }
   function refresh() {
@@ -22,23 +25,29 @@ export function createMarkers({ root, onEdit }) {
         button = document.createElement('button'); button.type = 'button'; button.className = 'marker';
         button.textContent = String(item.number); button.dataset.id = item.id;
         button.onclick = () => onEdit(item.id);
-        button.onpointerenter = () => outline(resolve(items.find((x) => x.id === button.dataset.id)));
+        button.onpointerenter = () => { const item = items.find((x) => x.id === button.dataset.id); outline(resolve(item), item?.color); };
         button.onpointerleave = () => outline(null);
         button.onfocus = button.onpointerenter; button.onblur = () => outline(null);
         layer.append(button); buttons.set(item.id, button);
+        const shade = document.createElement('div'); shade.className = 'shade';
+        layer.append(shade); shades.set(item.id, shade);
       }
+      const shade = shades.get(item.id);
+      applyColor(button, item.color); applyColor(shade, item.color);
       button.title = `${item.number}. ${labelFor(item)}${item.text ? ' · ' + item.text : ''}`;
-      button.setAttribute('aria-label', `피드백 ${item.number}: ${labelFor(item)}`);
+      button.setAttribute('aria-label', `피드백 ${item.number}: ${labelFor(item)} · ${(COLORS[item.color] || COLORS.violet).label}`);
       const element = resolve(item), r = element?.getBoundingClientRect();
       button.hidden = !enabled || !r || !r.width || !r.height || r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth;
+      shade.hidden = button.hidden;
       if (r) {
+        Object.assign(shade.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
         const key = `${Math.round(r.left)}:${Math.round(r.top)}`;
         const offset = positions.get(key) || 0; positions.set(key, offset + 1);
         Object.assign(button.style, { left: Math.min(innerWidth - 30, Math.max(4, r.left) + offset * 28) + 'px', top: Math.max(4, r.top) + 'px' });
       }
     }
-    for (const [id, button] of buttons) if (!items.some((x) => x.id === id)) { button.remove(); buttons.delete(id); }
-    if (selected) outline(selected.isConnected ? selected : null);
+    for (const [id, button] of buttons) if (!items.some((x) => x.id === id)) { button.remove(); buttons.delete(id); shades.get(id).remove(); shades.delete(id); }
+    if (selected) outline(selected.isConnected ? selected : null, selectedColor);
   }
   let frame;
   const queue = () => { if (!frame) frame = requestAnimationFrame(() => { frame = null; refresh(); }); };

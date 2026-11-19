@@ -34,6 +34,13 @@ h2, h3 { font-size: 16px; margin: 0; }
 .kind-chip span { display: flex; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 20px; font-weight: 600; }
 .kind-chip input:checked + span { color: #fff; background: var(--accent); border-color: var(--accent); }
 .kind-chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.color-group { padding: 0; border: 0; margin: 12px 0; min-width: 0; }
+.color-group legend { padding: 0; margin-bottom: 8px; }
+.color-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+#editor .color-chip { display: inline-flex; align-items: center; gap: 4px; margin: 0; min-height: 32px; padding: 4px 8px; border-radius: 20px; background: var(--mark-fill); color: var(--mark-ink); cursor: pointer; }
+.color-chip input { margin: 0; accent-color: var(--mark-ink); }
+.colored-item { color: var(--mark-ink); background: var(--mark-fill); }
+@media (max-width: 767px) { #editor .color-chip { min-height: 44px; } }
 @media (max-width: 767px) { .kind-chip span { min-height: 44px; } }
 #editor textarea { width: 100%; resize: vertical; min-height: 120px; border: 1px solid var(--line); border-radius: 4px; padding: 8px; }
 .where { color: var(--muted); max-height: 72px; overflow: auto; }
@@ -45,7 +52,8 @@ h2, h3 { font-size: 16px; margin: 0; }
 .primary { color: #fff; border-color: var(--accent); background: var(--accent); }
 #delete { margin-left: auto; color: #b91c1c; }
 #snapshot { width: 100%; max-height: 160px; object-fit: contain; border: 1px solid var(--line); }
-.outline { position: fixed; pointer-events: none; z-index: 2147483499; border: 3px solid #a21caf; background: #a21caf12; }
-.outline > span { position: absolute; bottom: 100%; left: 0; font-size: 11px; color: #fff; background: #86198f; max-width: 220px; padding: 1px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.marker { position: fixed; z-index: 2147483498; min-height: 24px; min-width: 24px; padding: 1px 5px; border: 2px solid #fff; border-radius: 20px; background: #86198f; color: #fff; font-weight: 700; box-shadow: 0 1px 4px #0005; }
+.shade { position: fixed; pointer-events: none; z-index: 2147483496; background: var(--mark-fill); }
+.outline { position: fixed; pointer-events: none; z-index: 2147483499; background: var(--mark-fill, #a21caf1f); }
+.outline > span { position: absolute; bottom: 100%; left: 0; font-size: 11px; color: #fff; background: var(--mark-ink, #86198f); max-width: 220px; padding: 1px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.marker { position: fixed; z-index: 2147483498; min-height: 24px; min-width: 24px; padding: 1px 5px; border: 2px solid #fff; border-radius: 20px; background: var(--mark-ink, #86198f); color: #fff; font-weight: 700; box-shadow: 0 1px 4px #0005; }
 @media (max-width: 767px) { .toolbar { right: 12px; left: 12px; bottom: 76px; justify-content: flex-end; } .panel { right: 12px; top: 68px; bottom: 142px; } #editor textarea, select { font-size: 16px; } button { min-height: 36px; } }

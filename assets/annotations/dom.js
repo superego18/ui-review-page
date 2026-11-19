@@ -4,6 +4,12 @@ export function pageKey(url) {
   return value.pathname + (value.search ? value.search : '');
 }
 
+export function isCurrentPage(item) {
+  return item.where?.scope === 'path'
+    ? new URL(item.url, location.origin).pathname === location.pathname
+    : pageKey(item.url) === pageKey(location.href);
+}
+
 // Adapted from agent-chat-widget's picker; storage uses selectors, not viewport coordinates.
 export function selectorOf(element) {
   const anchor = element.closest('[data-feedback-id]');
@@ -62,6 +68,7 @@ export function locate(element) {
   return {
     selector: selectorOf(element),
     name: nameOf(element), anchorId: anchor?.getAttribute('data-feedback-id') || '', exact: anchor === element,
+    ...(anchor?.getAttribute('data-feedback-scope') === 'path' ? { scope: 'path' } : {}),
     tag: element.tagName.toLowerCase(), text: textOf(element),
     component: componentOf(element), rect: { x: rect.left, y: rect.top, w: rect.width, h: rect.height },
     viewport: { w: innerWidth, h: innerHeight },
@@ -69,10 +76,13 @@ export function locate(element) {
 }
 
 export function resolve(item) {
-  if (!item?.where?.selector || pageKey(item.url) !== pageKey(location.href)) return null;
+  if (!item?.where?.selector || !isCurrentPage(item)) return null;
   try {
     const where = item.where;
-    if (where.anchorId && document.querySelectorAll(`[data-feedback-id="${CSS.escape(where.anchorId)}"]`).length !== 1) return null;
+    if (where.anchorId) {
+      const anchors = document.querySelectorAll(`[data-feedback-id="${CSS.escape(where.anchorId)}"]`);
+      if (anchors.length !== 1 || (where.scope === 'path' && anchors[0].getAttribute('data-feedback-scope') !== 'path')) return null;
+    } else if (where.scope === 'path') return null;
     const matches = document.querySelectorAll(where.selector);
     if (matches.length !== 1) return null;
     const element = matches[0];
@@ -90,6 +100,7 @@ export function locationInfo(item) {
   if (!item.where) return '위치 없는 전체 의견';
   const where = item.where;
   let text = where.anchorId && where.exact ? '고정 식별자 · 문구가 바뀌어도 같은 영역에 연결' : where.anchorId ? '이름 있는 영역 안의 요소 · 내부 구조 변경 시 재확인' : '화면 구조 기반 · 위치를 다시 찍으면 식별 정보를 갱신해요';
-  if (pageKey(item.url) === pageKey(location.href) && !resolve(item)) text += ' · 현재 대상을 확인할 수 없어요';
+  if (where.scope === 'path') text += ' · 시안 전환 후에도 표시';
+  if (isCurrentPage(item) && !resolve(item)) text += ' · 현재 대상을 확인할 수 없어요';
   return text;
 }

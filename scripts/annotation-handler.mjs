@@ -5,7 +5,7 @@ import { annotationMarkdown, createAnnotationStore } from './annotation-store.mj
 
 export const ANNOTATION_PREFIX = '/__uifb-feedback';
 const assets = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../assets/annotations');
-const FILES = new Set(['client.js', 'dom.js', 'picker.js', 'markers.js', 'panel.js', 'transport.js', 'style.css']);
+const FILES = new Set(['client.js', 'dom.js', 'picker.js', 'markers.js', 'panel.js', 'transport.js', 'colors.mjs', 'style.css']);
 function send(res, status, data, type = 'application/json; charset=utf-8') {
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
   res.end(typeof data === 'string' || Buffer.isBuffer(data) ? data : JSON.stringify(data));

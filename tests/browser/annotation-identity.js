@@ -22,6 +22,24 @@ async () => {
     assert(resolve(item) === null, '중복 식별자 중 하나를 임의로 고르면 안 됨');
     duplicate.remove(); region.remove();
     assert(resolve(item) === null, '고정 영역이 사라지면 다른 영역으로 대체하면 안 됨');
-    return { passed: true, cases: ['이름·값 분리', '문구·순서 변경', '하위 요소 유지', '잘못된 연결 차단', '중복·삭제 감지'] };
+    const originalUrl = location.href;
+    host.innerHTML = '<a data-feedback-id="regression:tab" data-feedback-scope="path" data-feedback-name="A 시안"><span>A</span> 시안</a><section data-feedback-id="regression:body">본문</section>';
+    const tab = host.firstElementChild, body = host.lastElementChild;
+    const tabItem = { url: originalUrl, where: locate(tab) };
+    const tabChild = { url: originalUrl, where: locate(tab.firstElementChild) };
+    const bodyItem = { url: originalUrl, where: locate(body) };
+    try {
+      const other = new URL(originalUrl); other.searchParams.set('v', 'regression-other');
+      history.replaceState(history.state, '', other);
+      assert(resolve(tabItem) === tab, '다른 시안에서도 공용 탭의 위치 표시가 유지되어야 함');
+      assert(resolve(tabChild) === tab.firstElementChild, '탭 안 글자를 찍어도 다른 시안에서 유지되어야 함');
+      assert(resolve(bodyItem) === null, '본문 위치는 다른 시안에 표시하면 안 됨');
+      tab.removeAttribute('data-feedback-scope');
+      assert(resolve(tabItem) === null, '현재 요소도 공용 범위를 명시해야 함');
+      tab.setAttribute('data-feedback-scope', 'path');
+      other.pathname += '/regression-other'; history.replaceState(history.state, '', other);
+      assert(resolve(tabItem) === null, '다른 페이지에서는 같은 식별자로 표시하면 안 됨');
+    } finally { history.replaceState(history.state, '', originalUrl); }
+    return { passed: true, cases: ['이름·값 분리', '문구·순서 변경', '하위 요소 유지', '잘못된 연결 차단', '중복·삭제 감지', '시안 전환 후 탭 표시 유지', '본문·다른 페이지 격리'] };
   } finally { host.remove(); }
 }

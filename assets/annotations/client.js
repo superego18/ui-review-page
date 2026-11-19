@@ -18,7 +18,7 @@ export function mountFeedback({ base = '/__uifb-feedback', capture, title = () =
   const panel = createPanel({
     root, base, title,
     onPick(draft) { pickDraft = draft; panel.picking(true, cancelPick); markers.show(false); picker.start(); },
-    onPreview(item) { markers.outline(item ? resolve(item) : null); },
+    onPreview(item) { markers.outline(item ? resolve(item) : null, item?.color); },
     async onSave(draft) {
       panel.setBusy(true); panel.status('');
       try {
